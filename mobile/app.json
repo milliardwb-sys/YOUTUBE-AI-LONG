@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "AI Video Studio MVP",
+    "slug": "ai-video-studio-mvp",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"]
+  }
+}

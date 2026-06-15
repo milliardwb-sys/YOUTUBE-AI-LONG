@@ -1,0 +1,30 @@
+{
+  "name": "ai-video-studio-mobile-stub",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit",
+    "audit:prod": "npm audit --omit=dev",
+    "check": "npm run typecheck",
+    "check:ci": "npm run audit:prod && npm run typecheck"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "4.0.0",
+    "expo": "56.0.11",
+    "expo-status-bar": "2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.3"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "typescript": "5.6.3"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  }
+}

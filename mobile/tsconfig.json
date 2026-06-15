@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-native",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["react", "react-native"],
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true
+  }
+}
