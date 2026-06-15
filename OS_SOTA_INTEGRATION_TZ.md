@@ -124,3 +124,32 @@ await sendOsSotaBroadcastStats({
    - появились SyncRun;
    - появились метрики/события/платежи/AI usage/маркетинг/задачи/документы;
    - нет ошибок авторизации или HMAC.
+
+
+## 11. Production слой, добавленный Codex
+
+В проект добавлен production-слой интеграции:
+
+- `os-sota-core-client.mjs` / `os_sota_core_client.py` теперь умеет не только отправлять данные, но и безопасно складывать их в локальную очередь `.os-sota-sync-queue.jsonl`, если OS SOTA временно недоступен.
+- `npm run os-sota:flush` повторно отправляет накопленную очередь.
+- `os-sota-auto-hooks.mjs` добавляет готовые hooks для Express/Fastify, runtime errors и heartbeat метрик.
+- Все реальные бизнес-события проекта надо подключать через safe-методы, чтобы основной продукт не падал из-за недоступности командного центра.
+
+Минимальная врезка в Node/Express:
+
+```js
+import { createOsSotaExpressMiddleware, registerOsSotaRuntimeHooks } from './os-sota-auto-hooks.mjs';
+
+registerOsSotaRuntimeHooks();
+app.use(createOsSotaExpressMiddleware());
+```
+
+Пример бизнес-события:
+
+```js
+import { trackOsSotaEvent, trackOsSotaPayment, trackOsSotaAiUsage } from './os-sota-core-client.mjs';
+
+await trackOsSotaEvent('lead.created', { leadId, source: 'telegram' }, { safe: true });
+await trackOsSotaPayment({ externalPaymentId, amount, currency: 'RUB', status: 'paid' }, { safe: true });
+await trackOsSotaAiUsage({ provider: 'openrouter', model, feature: 'generation', tokens, cost }, { safe: true });
+```
