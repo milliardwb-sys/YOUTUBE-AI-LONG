@@ -38,3 +38,12 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Audit and typecheck
         run: npm run check:ci
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose config
+        run: cp backend/.env.production.example backend/.env.production && docker compose config
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t youtube-ai-long-backend:ci backend
