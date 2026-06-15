@@ -1,27 +1,21 @@
-# Python
+.git
+.github
 __pycache__/
 *.py[cod]
-.venv/
-venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# App data / renders
+backend/.venv/
 backend/data/projects/*
 !backend/data/projects/.gitkeep
+
+mobile/node_modules/
+mobile/.expo/
+node_modules/
+
 *.mp4
 *.wav
 *.png
 *.jsonl
-
-# Node / mobile
-node_modules/
-.expo/
-dist/
-build/
 .env
-backend/.env.production
-
-# OS
-.DS_Store

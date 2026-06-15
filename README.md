@@ -83,6 +83,25 @@ curl http://localhost:8000/providers
 python -c "import app.main"
 ```
 
+## Docker запуск backend
+
+Для production-like запуска используйте Docker Compose:
+
+```bash
+cp backend/.env.production.example backend/.env.production
+# обязательно замените API_KEY на длинный секрет
+docker compose up --build
+```
+
+После старта:
+
+```bash
+curl http://localhost:8000/ready
+curl -H "X-API-Key: <API_KEY>" http://localhost:8000/projects
+```
+
+`APP_ENV=production` без `API_KEY` заблокирует приватные endpoints. Данные проектов сохраняются в Docker volume `backend-projects`.
+
 ## Demo без HTTP
 
 Синхронный pipeline:

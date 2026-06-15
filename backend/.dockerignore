@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+data/projects/*
+!data/projects/.gitkeep
+
+.env
+.env.production
+*.mp4
+*.wav
+*.png
+*.jsonl
