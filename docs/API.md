@@ -8,7 +8,9 @@ http://localhost:8000
 
 ## Auth
 
-Если задан `API_KEY`, все endpoints кроме `/health`, `/providers`, `/docs`, `/redoc` и `/openapi.json` требуют `X-API-Key: <API_KEY>`. Без ключа сервер отвечает `401`.
+Если задан `API_KEY`, все endpoints кроме `/health`, `/ready`, `/providers`, `/docs`, `/redoc` и `/openapi.json` требуют `X-API-Key: <API_KEY>`. Без ключа сервер отвечает `401`.
+
+Если `APP_ENV` не `local`, `test`, `dev` или `development`, backend требует настроенный `API_KEY` для приватных endpoints. Без ключа приватные routes возвращают `403`, чтобы production-сервер нельзя было случайно запустить открытым.
 
 ## Error contract
 

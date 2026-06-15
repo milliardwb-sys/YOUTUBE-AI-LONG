@@ -53,6 +53,10 @@ def _env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     if value is None:
         return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 
 def _env_int(name: str, default: int) -> int:
@@ -71,10 +75,6 @@ def _env_list(name: str, default: list[str]) -> list[str]:
         return default
     items = [item.strip() for item in value.split(",")]
     return [item for item in items if item]
-    try:
-        return float(value)
-    except ValueError:
-        return default
 
 
 def get_settings() -> Settings:

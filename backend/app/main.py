@@ -61,7 +61,15 @@ async def api_key_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or f"req_{uuid4().hex[:12]}"
     public_paths = {"/health", "/ready", "/providers", "/openapi.json"}
     is_docs_path = request.url.path in {"/docs", "/redoc"} or request.url.path.startswith("/docs/")
-    if settings.api_key and request.url.path not in public_paths and not is_docs_path:
+    is_public_path = request.url.path in public_paths or is_docs_path
+    if settings.app_env not in {"local", "test", "dev", "development"} and not settings.api_key and not is_public_path:
+        response = JSONResponse(
+            status_code=403,
+            content={"detail": "API_KEY must be configured for non-local environments"},
+        )
+        response.headers["x-request-id"] = request_id
+        return response
+    if settings.api_key and not is_public_path:
         if request.headers.get("x-api-key") != settings.api_key:
             response = JSONResponse(status_code=401, content={"detail": "Invalid or missing X-API-Key"})
             response.headers["x-request-id"] = request_id
@@ -169,6 +177,7 @@ def health() -> dict[str, str | bool | int]:
         "run_jobs_inline": settings.run_jobs_inline,
         "job_workers": settings.job_workers,
         "auth_required": bool(settings.api_key),
+        "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
     }
 
 
@@ -201,6 +210,7 @@ def diagnostics() -> dict:
             "available": bool(ffmpeg_bin),
         },
         "auth_required": bool(settings.api_key),
+        "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
         "cors_origins": settings.cors_origins,
         "browser_screenshots": {
             "enabled": settings.enable_browser_screenshots,

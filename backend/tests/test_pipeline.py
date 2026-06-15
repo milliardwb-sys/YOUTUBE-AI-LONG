@@ -9,7 +9,7 @@ from zipfile import ZipFile
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.models import JobStatus, JobType, ProjectCreate, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, VisualMode, VoiceProviderName
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
@@ -250,10 +250,27 @@ def test_render_service_resolves_ffmpeg_binary(tmp_path):
     assert resolver.resolve_ffmpeg_bin()
 
 
+def test_get_settings_parses_openai_temperature(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENAI_TEMPERATURE", "0.2")
+    settings = get_settings()
+
+    assert settings.openai_temperature == 0.2
+
+
+def test_get_settings_uses_default_for_invalid_openai_temperature(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENAI_TEMPERATURE", "not-a-number")
+    settings = get_settings()
+
+    assert settings.openai_temperature == 0.55
+
+
 def test_api_import_and_delete_smoke(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RUN_JOBS_INLINE", "true")
     monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("APP_ENV", "local")
     sys.modules.pop("app.main", None)
     main = importlib.import_module("app.main")
     client = TestClient(main.app)
@@ -273,6 +290,7 @@ def test_api_import_and_delete_smoke(tmp_path, monkeypatch):
 def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("API_KEY", "secret")
+    monkeypatch.setenv("APP_ENV", "production")
     sys.modules.pop("app.main", None)
     main = importlib.import_module("app.main")
     client = TestClient(main.app)
@@ -285,9 +303,26 @@ def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     assert client.get("/diagnostics", headers={"x-api-key": "secret"}).status_code == 200
 
 
+def test_production_requires_api_key_for_private_routes(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    assert client.get("/health").status_code == 200
+    assert client.get("/providers").status_code == 200
+    response = client.get("/projects")
+
+    assert response.status_code == 403
+    assert "API_KEY" in response.json()["detail"]
+
+
 def test_api_render_precondition_returns_409(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("APP_ENV", "local")
     sys.modules.pop("app.main", None)
     main = importlib.import_module("app.main")
     client = TestClient(main.app)
@@ -302,6 +337,7 @@ def test_api_render_precondition_returns_409(tmp_path, monkeypatch):
 
 def test_files_endpoint_blocks_traversal(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("APP_ENV", "local")
     (tmp_path / "victim.txt").write_text("secret", encoding="utf-8")
     sys.modules.pop("app.main", None)
     main = importlib.import_module("app.main")
