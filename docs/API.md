@@ -215,6 +215,14 @@ POST /projects/{id}/jobs/generate_all
   "progress": 66,
   "current_step": "finished_generate_slides",
   "error": null,
+  "events": [
+    {
+      "event": "queued",
+      "message": "queued_generate_all",
+      "progress": 0,
+      "created_at": "2026-06-16T10:00:00+00:00"
+    }
+  ],
   "result_project_status": null
 }
 ```
@@ -250,6 +258,21 @@ POST /projects/{id}/jobs/generate_all
 ### GET /projects/{id}/jobs
 
 Возвращает список задач проекта, новые сверху.
+
+### GET /jobs/{job_id}/events
+
+Возвращает историю событий job: постановка в очередь, запуск, progress steps, отмена, retry, failed/completed.
+
+```json
+[
+  {
+    "event": "progress",
+    "message": "finished_generate_slides",
+    "progress": 66,
+    "created_at": "2026-06-16T10:01:30+00:00"
+  }
+]
+```
 
 ## Синхронные pipeline endpoints
 

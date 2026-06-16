@@ -242,6 +242,9 @@ def test_inline_job_runner_generate_all(tmp_path):
     assert generated.status in {"completed", "failed"}
     assert generated.scenes
     assert generated.result.export_package_path
+    assert saved_job.events
+    assert saved_job.events[0]["event"] == "queued"
+    assert any(event["event"] == "progress" for event in saved_job.events)
 
 
 def test_render_service_resolves_ffmpeg_binary(tmp_path):
@@ -362,6 +365,10 @@ def test_api_cancel_and_retry_job(tmp_path, monkeypatch):
 
     cancel_again = client.post(f"/jobs/{job.id}/cancel")
     assert cancel_again.status_code == 409
+
+    events = client.get(f"/jobs/{job.id}/events")
+    assert events.status_code == 200
+    assert any(event["event"] == "cancelled" for event in events.json())
 
 
 def test_files_endpoint_blocks_traversal(tmp_path, monkeypatch):

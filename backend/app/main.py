@@ -395,6 +395,11 @@ def retry_job(job_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
+@app.get("/jobs/{job_id}/events")
+def get_job_events(job_id: str) -> list[dict]:
+    return _job_or_404(job_id).get("events", [])
+
+
 @app.get("/projects/{project_id}/jobs")
 def list_project_jobs(project_id: str) -> list[dict]:
     _get_project_or_404(project_id)

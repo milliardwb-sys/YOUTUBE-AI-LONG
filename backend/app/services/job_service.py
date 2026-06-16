@@ -53,6 +53,7 @@ class JobStore:
     def create(self, project_id: str, job_type: JobType) -> ProjectJob:
         validate_project_id(project_id)
         job = ProjectJob(project_id=project_id, type=job_type)
+        job.add_event("queued", f"queued_{job_type.value}", 0)
         self.save(job)
         return job
 
@@ -150,7 +151,10 @@ class JobRunner:
         original = self.job_store.get(job_id)
         if original.status in {JobStatus.queued, JobStatus.running}:
             raise JobNotRetryableError("Active jobs cannot be retried")
-        return self.start(original.project_id, original.type)
+        retried = self.start(original.project_id, original.type)
+        retried.add_event("retry_of", original.id, retried.progress)
+        self.job_store.save(retried)
+        return retried
 
     def _execute(self, job_id: str) -> None:
         job = self.job_store.get(job_id)
@@ -168,6 +172,7 @@ class JobRunner:
 
             self._raise_if_cancelled(job.id)
             project = self.pipeline.store.get(job.project_id)
+            job = self.job_store.get(job_id)
             if project.status == ProjectStatus.failed:
                 job.mark_failed(project.error or "Project failed")
             else:
@@ -244,6 +249,7 @@ class JobRunner:
             raise JobCancelledError(fresh.error or "Job cancelled")
         fresh.progress = max(fresh.progress, min(99, progress))
         fresh.current_step = step
+        fresh.add_event("progress", step, fresh.progress)
         self.job_store.save(fresh)
         job.progress = fresh.progress
         job.current_step = fresh.current_step

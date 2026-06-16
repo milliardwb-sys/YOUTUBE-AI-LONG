@@ -291,6 +291,7 @@ class ProjectJob(BaseModel):
     progress: int = Field(default=0, ge=0, le=100)
     current_step: str = "queued"
     error: str | None = None
+    events: list[dict[str, str | int | None]] = Field(default_factory=list)
     result_project_status: ProjectStatus | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -302,10 +303,21 @@ class ProjectJob(BaseModel):
         if step:
             self.current_step = step
 
+    def add_event(self, event: str, message: str | None = None, progress: int | None = None) -> None:
+        self.events.append(
+            {
+                "event": event,
+                "message": message,
+                "progress": self.progress if progress is None else progress,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
     def mark_running(self, step: str = "running") -> None:
         self.status = JobStatus.running
         self.started_at = self.started_at or datetime.now(timezone.utc)
         self.touch(step)
+        self.add_event("running", step)
 
     def mark_completed(self, project_status: ProjectStatus | str | None = None) -> None:
         self.status = JobStatus.completed
@@ -314,15 +326,18 @@ class ProjectJob(BaseModel):
         if project_status is not None:
             self.result_project_status = ProjectStatus(project_status)
         self.touch("completed")
+        self.add_event("completed", str(project_status) if project_status else None, 100)
 
     def mark_failed(self, error: str) -> None:
         self.status = JobStatus.failed
         self.error = error
         self.completed_at = datetime.now(timezone.utc)
         self.touch("failed")
+        self.add_event("failed", error)
 
     def mark_cancelled(self, reason: str = "Job cancelled") -> None:
         self.status = JobStatus.cancelled
         self.error = reason
         self.completed_at = datetime.now(timezone.utc)
         self.touch("cancelled")
+        self.add_event("cancelled", reason)

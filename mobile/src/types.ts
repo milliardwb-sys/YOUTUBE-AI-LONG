@@ -29,11 +29,19 @@ export type ProjectJob = {
   progress: number;
   current_step: string;
   error?: string | null;
+  events?: JobEvent[];
   result_project_status?: ProjectStatus | null;
   created_at: string;
   updated_at: string;
   started_at?: string | null;
   completed_at?: string | null;
+};
+
+export type JobEvent = {
+  event: string;
+  message?: string | null;
+  progress?: number | null;
+  created_at: string;
 };
 
 export type SourceCandidate = {

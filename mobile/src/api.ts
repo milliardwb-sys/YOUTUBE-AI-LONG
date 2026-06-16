@@ -1,4 +1,4 @@
-import type { JobType, Project, ProjectJob } from './types';
+import type { JobEvent, JobType, Project, ProjectJob } from './types';
 
 declare const process: {
   env?: Record<string, string | undefined>;
@@ -82,6 +82,12 @@ export async function startProjectJob(projectId: string, jobType: JobType = 'gen
 export async function getJob(jobId: string): Promise<ProjectJob> {
   const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, { headers: headers() });
   await assertOk(response, 'Get job');
+  return response.json();
+}
+
+export async function getJobEvents(jobId: string): Promise<JobEvent[]> {
+  const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/events`, { headers: headers() });
+  await assertOk(response, 'Get job events');
   return response.json();
 }
 

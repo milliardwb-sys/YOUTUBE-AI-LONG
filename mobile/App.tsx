@@ -157,6 +157,11 @@ export default function App() {
             <Text>Status: {project.status}</Text>
             <Text>Step: {project.current_step}</Text>
             {job ? <Text>Job: {job.status} · {job.progress}% · {job.current_step}</Text> : null}
+            {job?.events?.slice(-5).map((event, index) => (
+              <Text key={`${event.created_at}-${index}`} style={styles.event}>
+                {event.event}: {event.message ?? event.progress ?? ''}
+              </Text>
+            ))}
             <Text>Script: {project.script_provider ?? '—'}</Text>
             <Text>Voice: {project.voice_provider ?? '—'}</Text>
             <Text>Scenes: {project.scenes?.length ?? 0}</Text>
@@ -241,6 +246,7 @@ const styles = StyleSheet.create({
   warning: { color: '#8a5a00', marginTop: 8 },
   source: { color: '#334155', marginTop: 4 },
   scene: { color: '#334155', marginTop: 4 },
+  event: { color: '#475569', marginTop: 3, fontSize: 12 },
   card: { backgroundColor: 'white', padding: 18, borderRadius: 18, gap: 8, marginTop: 18 },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
   link: { color: '#2457c5' },
