@@ -38,6 +38,8 @@
 - обновлённая заготовка Expo-приложения с polling job progress;
 - документация по API, архитектуре и следующим шагам.
 
+Подробное описание продукта, схемы работы и интеграций: [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md).
+
 ## Что важно
 
 Это **не финальный production-продукт**, а кодовый каркас. Он специально сделан так, чтобы запускаться без платных AI-провайдеров, без внешнего интернета и без браузера.
@@ -96,8 +98,8 @@ docker compose up --build
 После старта:
 
 ```bash
-curl http://localhost:8000/ready
-curl -H "X-API-Key: <API_KEY>" http://localhost:8000/projects
+curl http://127.0.0.1:8000/ready
+curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 ```
 
 `APP_ENV=production` без `API_KEY` заблокирует приватные endpoints. Данные проектов сохраняются в Docker volume `backend-projects`.
