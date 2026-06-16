@@ -44,6 +44,44 @@ export type JobEvent = {
   created_at: string;
 };
 
+export type ProjectArtifact = {
+  key: string;
+  path?: string | null;
+  url?: string | null;
+  exists: boolean;
+  size_bytes: number;
+};
+
+export type ProjectManifest = {
+  project_id: string;
+  topic: string;
+  status: ProjectStatus;
+  current_step: string;
+  error?: string | null;
+  warnings: string[];
+  counts: {
+    scenes: number;
+    sources: number;
+    scenes_with_visuals: number;
+    scenes_with_audio: number;
+    sources_with_screenshots: number;
+    expected_artifacts: number;
+    ready_artifacts: number;
+    missing_artifacts: number;
+  };
+  readiness: {
+    script: boolean;
+    sources: boolean;
+    visuals: boolean;
+    voice: boolean;
+    render: boolean;
+    export_package: boolean;
+    publish_ready: boolean;
+  };
+  artifacts: ProjectArtifact[];
+  missing_artifacts: string[];
+};
+
 export type SourceCandidate = {
   id: string;
   name: string;

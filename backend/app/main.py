@@ -49,6 +49,23 @@ app = FastAPI(
     description="MVP backend: topic -> jobs -> script provider -> sources -> voice provider -> slides -> MP4.",
 )
 
+RESULT_ARTIFACT_KEYS = [
+    "final_video_path",
+    "subtitles_path",
+    "captions_vtt_path",
+    "description_path",
+    "sources_path",
+    "storyboard_path",
+    "thumbnail_prompt_path",
+    "thumbnail_path",
+    "title_options_path",
+    "youtube_metadata_path",
+    "quality_report_path",
+    "voice_manifest_path",
+    "render_manifest_path",
+    "export_package_path",
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -147,42 +164,90 @@ def _get_project_or_404(project_id: str) -> Project:
 def _with_file_urls(project: Project) -> dict:
     payload = project.model_dump(mode="json")
 
-    def public_url(path_value: str | None) -> str | None:
-        if not path_value:
-            return None
-        try:
-            path = ensure_within_directory(settings.data_dir, Path(path_value))
-            relative = path.relative_to(settings.data_dir)
-        except (OSError, ValueError):
-            return None
-        return f"{settings.public_base_url}/files/{relative.as_posix()}"
-
     result = payload.get("result", {})
-    for key in [
-        "final_video_path",
-        "subtitles_path",
-        "captions_vtt_path",
-        "description_path",
-        "sources_path",
-        "storyboard_path",
-        "thumbnail_prompt_path",
-        "thumbnail_path",
-        "title_options_path",
-        "youtube_metadata_path",
-        "quality_report_path",
-        "voice_manifest_path",
-        "render_manifest_path",
-        "export_package_path",
-    ]:
-        result[key.replace("_path", "_url")] = public_url(result.get(key))
+    for key in RESULT_ARTIFACT_KEYS:
+        result[key.replace("_path", "_url")] = _public_file_url(result.get(key))
     payload["result"] = result
 
     for scene in payload.get("scenes", []):
-        scene["visual_url"] = public_url(scene.get("visual_path"))
-        scene["audio_url"] = public_url(scene.get("audio_path"))
+        scene["visual_url"] = _public_file_url(scene.get("visual_path"))
+        scene["audio_url"] = _public_file_url(scene.get("audio_path"))
     for source in payload.get("sources", []):
-        source["screenshot_url"] = public_url(source.get("screenshot_path"))
+        source["screenshot_url"] = _public_file_url(source.get("screenshot_path"))
     return payload
+
+
+def _public_file_url(path_value: str | None) -> str | None:
+    if not path_value:
+        return None
+    try:
+        path = ensure_within_directory(settings.data_dir, Path(path_value))
+        relative = path.relative_to(settings.data_dir)
+    except (OSError, ValueError):
+        return None
+    return f"{settings.public_base_url}/files/{relative.as_posix()}"
+
+
+def _artifact_entry(key: str, path_value: str | None) -> dict:
+    exists = False
+    size_bytes = 0
+    if path_value:
+        try:
+            path = ensure_within_directory(settings.data_dir, Path(path_value))
+            exists = path.is_file()
+            size_bytes = path.stat().st_size if exists else 0
+        except (OSError, ValueError):
+            exists = False
+            size_bytes = 0
+    return {
+        "key": key.replace("_path", ""),
+        "path": path_value,
+        "url": _public_file_url(path_value),
+        "exists": exists,
+        "size_bytes": size_bytes,
+    }
+
+
+def _project_manifest(project: Project) -> dict:
+    result = project.result.model_dump(mode="json")
+    artifacts = [_artifact_entry(key, result.get(key)) for key in RESULT_ARTIFACT_KEYS]
+    missing_artifacts = [item["key"] for item in artifacts if item["path"] and not item["exists"]]
+    expected_artifacts = [item["key"] for item in artifacts if item["path"]]
+    ready_artifacts = [item["key"] for item in artifacts if item["exists"]]
+    scenes_with_visuals = sum(1 for scene in project.scenes if scene.visual_path)
+    scenes_with_audio = sum(1 for scene in project.scenes if scene.audio_path)
+    captured_sources = sum(1 for source in project.sources if source.screenshot_path)
+    has_render_output = bool(project.result.final_video_path and _artifact_entry("final_video_path", project.result.final_video_path)["exists"])
+    has_export_package = bool(project.result.export_package_path and _artifact_entry("export_package_path", project.result.export_package_path)["exists"])
+    return {
+        "project_id": project.id,
+        "topic": project.topic,
+        "status": project.status,
+        "current_step": project.current_step,
+        "error": project.error,
+        "warnings": project.result.warnings,
+        "counts": {
+            "scenes": len(project.scenes),
+            "sources": len(project.sources),
+            "scenes_with_visuals": scenes_with_visuals,
+            "scenes_with_audio": scenes_with_audio,
+            "sources_with_screenshots": captured_sources,
+            "expected_artifacts": len(expected_artifacts),
+            "ready_artifacts": len(ready_artifacts),
+            "missing_artifacts": len(missing_artifacts),
+        },
+        "readiness": {
+            "script": bool(project.scenes),
+            "sources": bool(project.sources),
+            "visuals": bool(project.scenes) and scenes_with_visuals == len(project.scenes),
+            "voice": bool(project.scenes) and scenes_with_audio == len(project.scenes),
+            "render": has_render_output,
+            "export_package": has_export_package,
+            "publish_ready": project.status == ProjectStatus.completed and has_render_output and has_export_package and not missing_artifacts,
+        },
+        "artifacts": artifacts,
+        "missing_artifacts": missing_artifacts,
+    }
 
 
 def _job_or_404(job_id: str) -> dict:
@@ -536,6 +601,11 @@ def project_status(project_id: str) -> dict:
         "source_count": len(project.sources),
         "latest_job": latest_job,
     }
+
+
+@app.get("/projects/{project_id}/manifest")
+def project_manifest(project_id: str) -> dict:
+    return _project_manifest(_get_project_or_404(project_id))
 
 
 @app.get("/projects/{project_id}/result")

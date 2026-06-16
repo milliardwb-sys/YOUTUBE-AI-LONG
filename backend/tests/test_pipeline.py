@@ -354,6 +354,34 @@ def test_api_stats_endpoint(tmp_path, monkeypatch):
     assert payload["jobs"]["job_count"] == 0
 
 
+def test_api_project_manifest_reports_readiness_and_missing_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post("/projects", json={"topic": "РўРµСЃС‚РѕРІС‹Р№ API manifest РїСЂРѕРµРєС‚"})
+    assert created.status_code == 200
+    project_id = created.json()["id"]
+    project = main.store.get(project_id)
+    project.result.final_video_path = str(main.store.project_dir(project_id) / "missing.mp4")
+    main.store.save(project)
+
+    response = client.get(f"/projects/{project_id}/manifest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["project_id"] == project_id
+    assert payload["readiness"]["script"] is False
+    assert payload["readiness"]["publish_ready"] is False
+    assert payload["counts"]["missing_artifacts"] == 1
+    assert payload["missing_artifacts"] == ["final_video"]
+    assert payload["artifacts"][0]["key"] == "final_video"
+    assert payload["artifacts"][0]["exists"] is False
+
+
 def test_api_rate_limit_returns_429(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")

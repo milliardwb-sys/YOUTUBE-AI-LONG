@@ -206,3 +206,9 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 6. Подключить production render stack на Remotion.
 7. Подключить avatar/voice providers с consent flow.
 8. Добавить billing, лимиты, cost tracking и admin panel.
+
+# Project Manifest Update
+
+`GET /projects/{id}/manifest` adds a compact readiness audit for each project. It reports scene/source counts, visual/audio coverage, expected artifacts, ready artifacts, missing files, per-artifact URLs and sizes, and a final `publish_ready` flag.
+
+The mobile MVP reads this manifest after a job finishes and shows whether the generated project is ready for publishing or still has missing artifacts.

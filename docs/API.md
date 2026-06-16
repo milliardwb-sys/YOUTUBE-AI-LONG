@@ -51,6 +51,39 @@ Retry-After
 }
 ```
 
+## GET /projects/{id}/manifest
+
+Returns a project readiness manifest for audit, UI checks, and publish preflight.
+
+The manifest includes project status, scene/source counts, scenes with visuals and audio, expected/ready/missing artifacts, per-artifact file existence and size, and readiness flags for script, sources, visuals, voice, render, export package, and final publish readiness.
+
+```json
+{
+  "project_id": "project_...",
+  "status": "completed",
+  "current_step": "completed",
+  "counts": {
+    "scenes": 8,
+    "sources": 4,
+    "scenes_with_visuals": 8,
+    "scenes_with_audio": 8,
+    "expected_artifacts": 14,
+    "ready_artifacts": 14,
+    "missing_artifacts": 0
+  },
+  "readiness": {
+    "script": true,
+    "sources": true,
+    "visuals": true,
+    "voice": true,
+    "render": true,
+    "export_package": true,
+    "publish_ready": true
+  },
+  "missing_artifacts": []
+}
+```
+
 ## GET /providers
 
 Показывает доступные provider-настройки и job-настройки.

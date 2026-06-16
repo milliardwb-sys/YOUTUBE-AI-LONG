@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Button, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { cancelJob, createProject, delay, getJob, getProject, retryJob, startProjectJob } from './src/api';
-import type { Project, ProjectJob } from './src/types';
+import { cancelJob, createProject, delay, getJob, getProject, getProjectManifest, retryJob, startProjectJob } from './src/api';
+import type { Project, ProjectJob, ProjectManifest } from './src/types';
 
 export default function App() {
   const [topic, setTopic] = useState('5 AI-сервисов для создания видео в 2026 году');
@@ -12,6 +12,7 @@ export default function App() {
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
   const [job, setJob] = useState<ProjectJob | null>(null);
+  const [manifest, setManifest] = useState<ProjectManifest | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,6 +20,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     setJob(null);
+    setManifest(null);
     try {
       const created = await createProject({
         topic,
@@ -50,6 +52,7 @@ export default function App() {
 
     const finalProject = await getProject(projectId);
     setProject(finalProject);
+    setManifest(await getProjectManifest(projectId));
     if (currentJob.status === 'failed') {
       setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
     }
@@ -66,6 +69,7 @@ export default function App() {
       setJob(cancelled);
       if (project) {
         setProject(await getProject(project.id));
+        setManifest(await getProjectManifest(project.id));
       }
       setLoading(false);
     } catch (err) {
@@ -80,6 +84,7 @@ export default function App() {
     try {
       const retried = await retryJob(job.id);
       setJob(retried);
+      setManifest(null);
       await pollJob(project.id, retried);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Retry failed');
@@ -166,6 +171,17 @@ export default function App() {
             <Text>Voice: {project.voice_provider ?? '—'}</Text>
             <Text>Scenes: {project.scenes?.length ?? 0}</Text>
             <Text>Sources: {project.sources?.length ?? 0}</Text>
+            {manifest ? (
+              <View style={styles.manifestBox}>
+                <Text style={styles.manifestTitle}>Manifest: {manifest.readiness.publish_ready ? 'publish ready' : 'not ready'}</Text>
+                <Text>Artifacts: {manifest.counts.ready_artifacts}/{manifest.counts.expected_artifacts}</Text>
+                <Text>Visuals: {manifest.counts.scenes_with_visuals}/{manifest.counts.scenes}</Text>
+                <Text>Voice: {manifest.counts.scenes_with_audio}/{manifest.counts.scenes}</Text>
+                {manifest.missing_artifacts.length ? (
+                  <Text style={styles.warning}>Missing: {manifest.missing_artifacts.join(', ')}</Text>
+                ) : null}
+              </View>
+            ) : null}
             {project.result?.final_video_url ? (
               <Text style={styles.link}>Video: {project.result.final_video_url}</Text>
             ) : null}
@@ -247,6 +263,8 @@ const styles = StyleSheet.create({
   source: { color: '#334155', marginTop: 4 },
   scene: { color: '#334155', marginTop: 4 },
   event: { color: '#475569', marginTop: 3, fontSize: 12 },
+  manifestBox: { backgroundColor: '#f8fafc', borderRadius: 10, padding: 12, gap: 4, marginTop: 6 },
+  manifestTitle: { color: '#111827', fontWeight: '800' },
   card: { backgroundColor: 'white', padding: 18, borderRadius: 18, gap: 8, marginTop: 18 },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
   link: { color: '#2457c5' },
