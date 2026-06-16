@@ -90,6 +90,40 @@ Retry-After
 }
 ```
 
+## GET /stats
+
+Возвращает компактную статистику MVP-хранилища и job queue.
+
+```json
+{
+  "status": "ok",
+  "version": "0.4.0",
+  "env": "local",
+  "storage": {
+    "project_count": 3,
+    "projects_by_status": {
+      "completed": 1,
+      "draft": 2
+    },
+    "storage_files": 42,
+    "storage_bytes": 10485760
+  },
+  "jobs": {
+    "job_count": 4,
+    "active_jobs": 1,
+    "terminal_jobs": 3,
+    "jobs_by_status": {
+      "running": 1,
+      "completed": 2,
+      "cancelled": 1
+    },
+    "jobs_by_type": {
+      "generate_all": 4
+    }
+  }
+}
+```
+
 ## POST /projects
 
 Создаёт проект.

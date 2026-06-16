@@ -212,6 +212,27 @@ def test_duplicate_project_resets_outputs(tmp_path):
     assert duplicate.status == "draft"
 
 
+def test_project_and_job_stats(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+    job_store = JobStore(settings)
+    project = store.create_project(ProjectCreate(topic="Тестовый проект для статистики"))
+    job = job_store.create(project.id, JobType.generate_script)
+    job.mark_cancelled("not needed")
+    job_store.save(job)
+
+    project_stats = store.stats()
+    job_stats = job_store.stats()
+
+    assert project_stats["project_count"] == 1
+    assert project_stats["projects_by_status"]["draft"] == 1
+    assert project_stats["storage_files"] >= 2
+    assert job_stats["job_count"] == 1
+    assert job_stats["terminal_jobs"] == 1
+    assert job_stats["jobs_by_status"]["cancelled"] == 1
+    assert job_stats["jobs_by_type"]["generate_script"] == 1
+
+
 def test_inline_job_runner_generate_all(tmp_path):
     settings = make_settings(tmp_path)
     store = ProjectStore(settings)
@@ -313,6 +334,24 @@ def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     assert client.get("/diagnostics").status_code == 401
     assert client.get("/projects", headers={"x-api-key": "secret"}).status_code == 200
     assert client.get("/diagnostics", headers={"x-api-key": "secret"}).status_code == 200
+
+
+def test_api_stats_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post("/projects", json={"topic": "Тестовый API stats проект"})
+    assert created.status_code == 200
+    response = client.get("/stats")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["storage"]["project_count"] == 1
+    assert payload["jobs"]["job_count"] == 0
 
 
 def test_api_rate_limit_returns_429(tmp_path, monkeypatch):

@@ -34,6 +34,7 @@
 Backend запускается как FastAPI API. Основные endpoint-группы:
 
 - `/health`, `/ready`, `/diagnostics` — диагностика.
+- `/stats` — статистика проектов, job queue и локального storage.
 - `/providers` — доступные AI/render/source режимы.
 - `/projects` — создание, чтение, обновление и удаление проектов.
 - `/projects/{id}/jobs/{job_type}` — запуск долгих задач.
@@ -168,6 +169,7 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 - Job progress polling.
 - Job cancel/retry endpoints.
 - Job events/history в JSON job-файлах.
+- `/stats` endpoint для базовой админской диагностики.
 - Template сценарии.
 - OpenAI LLM/TTS adapters.
 - Safe source URL validation.

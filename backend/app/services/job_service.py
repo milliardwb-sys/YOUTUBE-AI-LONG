@@ -106,6 +106,33 @@ class JobStore:
             removed += 1
         return {"removed_jobs": removed, "skipped_jobs": skipped}
 
+    def list_all(self) -> list[ProjectJob]:
+        jobs: list[ProjectJob] = []
+        for job_file in sorted(self.jobs_dir.glob("job_*.json")):
+            jobs.append(ProjectJob.model_validate(read_json(job_file)))
+        return sorted(jobs, key=lambda item: item.created_at, reverse=True)
+
+    def stats(self) -> dict:
+        jobs = self.list_all()
+        by_status: dict[str, int] = {}
+        by_type: dict[str, int] = {}
+        active = 0
+        terminal = 0
+        for job in jobs:
+            by_status[job.status.value] = by_status.get(job.status.value, 0) + 1
+            by_type[job.type.value] = by_type.get(job.type.value, 0) + 1
+            if job.status in {JobStatus.queued, JobStatus.running}:
+                active += 1
+            else:
+                terminal += 1
+        return {
+            "job_count": len(jobs),
+            "active_jobs": active,
+            "terminal_jobs": terminal,
+            "jobs_by_status": by_status,
+            "jobs_by_type": by_type,
+        }
+
 
 class JobRunner:
     def __init__(self, settings: Settings, pipeline: VideoPipeline, job_store: JobStore):

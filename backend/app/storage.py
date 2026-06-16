@@ -253,6 +253,28 @@ class ProjectStore:
             removed += 1
         return {"removed_projects": removed, "skipped_projects": skipped}
 
+    def stats(self) -> dict:
+        projects = self.list_projects()
+        by_status: dict[str, int] = {}
+        total_files = 0
+        total_bytes = 0
+        for project in projects:
+            by_status[project.status.value] = by_status.get(project.status.value, 0) + 1
+        if self.settings.data_dir.exists():
+            for path in self.settings.data_dir.rglob("*"):
+                if path.is_file():
+                    total_files += 1
+                    try:
+                        total_bytes += path.stat().st_size
+                    except OSError:
+                        continue
+        return {
+            "project_count": len(projects),
+            "projects_by_status": by_status,
+            "storage_files": total_files,
+            "storage_bytes": total_bytes,
+        }
+
     def _resolve_insert_order(self, project: Project, payload: SceneCreate) -> int:
         if payload.after_scene_id:
             after = next((scene for scene in project.scenes if scene.id == payload.after_scene_id), None)

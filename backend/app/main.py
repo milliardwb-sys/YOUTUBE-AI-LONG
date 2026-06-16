@@ -272,6 +272,7 @@ def diagnostics() -> dict:
         "jobs": {
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
+            **job_store.stats(),
         },
     }
 
@@ -312,6 +313,17 @@ def providers() -> dict:
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
         },
+    }
+
+
+@app.get("/stats")
+def stats() -> dict:
+    return {
+        "status": "ok",
+        "version": "0.4.0",
+        "env": settings.app_env,
+        "storage": store.stats(),
+        "jobs": job_store.stats(),
     }
 
 
