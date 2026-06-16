@@ -10,11 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
-from app.models import JobStatus, JobType, ProjectCreate, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, VisualMode, VoiceProviderName
+from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, VisualMode, VoiceProviderName
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
 from app.services.compliance_service import ComplianceService
-from app.services.job_service import JobRunner, JobStore
+from app.services.job_service import JobNotCancellableError, JobRunner, JobStore
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
 from app.services.source_service import SourceService
@@ -335,6 +335,35 @@ def test_api_render_precondition_returns_409(tmp_path, monkeypatch):
     assert response.json()["detail"]["current_step"] == "precondition_failed"
 
 
+def test_api_cancel_and_retry_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUN_JOBS_INLINE", "true")
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post("/projects", json={"topic": "Тестовый API проект для cancel retry"})
+    project_id = created.json()["id"]
+    project = main.store.get(project_id)
+    project.status = ProjectStatus.queued
+    main.store.save(project)
+    job = main.job_store.create(project_id, JobType.render)
+
+    cancelled = client.post(f"/jobs/{job.id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+    retried = client.post(f"/jobs/{job.id}/retry")
+    assert retried.status_code == 200
+    assert retried.json()["id"] != job.id
+    assert retried.json()["status"] == "failed"
+
+    cancel_again = client.post(f"/jobs/{job.id}/cancel")
+    assert cancel_again.status_code == 409
+
+
 def test_files_endpoint_blocks_traversal(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("APP_ENV", "local")
@@ -379,3 +408,39 @@ def test_job_runner_deduplicates_active_project_jobs(tmp_path):
     second = runner.start(project.id, JobType.generate_all)
 
     assert second.id == first.id
+
+
+def test_job_runner_can_cancel_queued_job_and_retry(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+    pipeline = make_pipeline(settings, store)
+    job_store = JobStore(settings)
+    runner = JobRunner(settings, pipeline, job_store)
+    project = store.create_project(ProjectCreate(topic="Тестовый проект для отмены job"))
+    project.status = ProjectStatus.queued
+    store.save(project)
+    job = job_store.create(project.id, JobType.render)
+
+    cancelled = runner.cancel(job.id)
+
+    assert cancelled.status == JobStatus.cancelled
+    assert store.get(project.id).status == "cancelled"
+
+    retried = runner.retry(job.id)
+
+    assert retried.id != job.id
+    assert retried.status == JobStatus.failed
+    assert "Project has no scenes" in (retried.error or "")
+
+
+def test_job_store_rejects_cancelling_terminal_job(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+    project = store.create_project(ProjectCreate(topic="Тестовый проект для terminal job"))
+    job_store = JobStore(settings)
+    job = job_store.create(project.id, JobType.generate_script)
+    job.mark_completed("completed")
+    job_store.save(job)
+
+    with pytest.raises(JobNotCancellableError):
+        job_store.cancel(job.id)

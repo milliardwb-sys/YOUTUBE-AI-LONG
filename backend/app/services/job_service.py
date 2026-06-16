@@ -21,6 +21,18 @@ class JobAlreadyRunningError(RuntimeError):
     pass
 
 
+class JobNotCancellableError(RuntimeError):
+    pass
+
+
+class JobNotRetryableError(RuntimeError):
+    pass
+
+
+class JobCancelledError(RuntimeError):
+    pass
+
+
 class JobStore:
     """Small file-backed job store for the MVP.
 
@@ -70,6 +82,15 @@ class JobStore:
                 return job
         return None
 
+    def cancel(self, job_id: str, reason: str = "Job cancelled by user") -> ProjectJob:
+        with self._lock:
+            job = self.get(job_id)
+            if job.status not in {JobStatus.queued, JobStatus.running}:
+                raise JobNotCancellableError(f"Job is already {job.status}")
+            job.mark_cancelled(reason)
+            write_json(self.job_file(job.id), job.model_dump(mode="json"))
+            return job
+
     def cleanup_old_jobs(self, retention_days: int | None = None) -> dict[str, int]:
         retention = retention_days if retention_days is not None else self.settings.cleanup_retention_days
         cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, retention))
@@ -112,26 +133,63 @@ class JobRunner:
             self.executor.submit(self._execute, job.id)
         return self.job_store.get(job.id)
 
+    def cancel(self, job_id: str) -> ProjectJob:
+        job = self.job_store.cancel(job_id)
+        try:
+            project = self.pipeline.store.get(job.project_id)
+            if project.status in {ProjectStatus.queued, ProjectStatus.researching, ProjectStatus.rendering}:
+                project.status = ProjectStatus.cancelled
+                project.error = job.error
+                project.touch("job_cancelled")
+                self.pipeline.store.save(project)
+        except Exception:
+            pass
+        return job
+
+    def retry(self, job_id: str) -> ProjectJob:
+        original = self.job_store.get(job_id)
+        if original.status in {JobStatus.queued, JobStatus.running}:
+            raise JobNotRetryableError("Active jobs cannot be retried")
+        return self.start(original.project_id, original.type)
+
     def _execute(self, job_id: str) -> None:
         job = self.job_store.get(job_id)
         try:
+            self._raise_if_cancelled(job.id)
             job.mark_running(f"running_{job.type.value}")
             job.progress = 5
             self.job_store.save(job)
+            self._raise_if_cancelled(job.id)
 
             if job.type == JobType.generate_all:
                 self._run_generate_all(job)
             else:
                 self._run_single(job)
 
+            self._raise_if_cancelled(job.id)
             project = self.pipeline.store.get(job.project_id)
             if project.status == ProjectStatus.failed:
                 job.mark_failed(project.error or "Project failed")
             else:
                 job.mark_completed(project.status)
             self.job_store.save(job)
+        except JobCancelledError as exc:
+            job = self.job_store.get(job_id)
+            if job.status != JobStatus.cancelled:
+                job.mark_cancelled(str(exc))
+                self.job_store.save(job)
+            try:
+                project = self.pipeline.store.get(job.project_id)
+                project.status = ProjectStatus.cancelled
+                project.error = job.error
+                project.touch("job_cancelled")
+                self.pipeline.store.save(project)
+            except Exception:
+                pass
         except Exception as exc:  # noqa: BLE001 - job must always finish with saved error
             job = self.job_store.get(job_id)
+            if job.status == JobStatus.cancelled:
+                return
             job.mark_failed(str(exc))
             self.job_store.save(job)
             try:
@@ -157,7 +215,9 @@ class JobRunner:
             raise RuntimeError(f"Unsupported job type: {job.type}")
         name, progress, fn = step
         self._update(job, progress=25, step=f"starting_{name}")
+        self._raise_if_cancelled(job.id)
         fn(job.project_id)
+        self._raise_if_cancelled(job.id)
         self._update(job, progress=progress, step=f"finished_{name}")
 
     def _run_generate_all(self, job: ProjectJob) -> None:
@@ -171,15 +231,24 @@ class JobRunner:
         ]
         for name, progress, fn in workflow:
             self._update(job, progress=max(1, progress - 8), step=f"starting_{name}")
+            self._raise_if_cancelled(job.id)
             project = fn(job.project_id)
+            self._raise_if_cancelled(job.id)
             self._update(job, progress=progress, step=f"finished_{name}")
             if project.status == ProjectStatus.failed:
                 raise RuntimeError(project.error or f"Project failed at {name}")
 
     def _update(self, job: ProjectJob, *, progress: int, step: str) -> None:
         fresh = self.job_store.get(job.id)
+        if fresh.status == JobStatus.cancelled:
+            raise JobCancelledError(fresh.error or "Job cancelled")
         fresh.progress = max(fresh.progress, min(99, progress))
         fresh.current_step = step
         self.job_store.save(fresh)
         job.progress = fresh.progress
         job.current_step = fresh.current_step
+
+    def _raise_if_cancelled(self, job_id: str) -> None:
+        fresh = self.job_store.get(job_id)
+        if fresh.status == JobStatus.cancelled:
+            raise JobCancelledError(fresh.error or "Job cancelled")

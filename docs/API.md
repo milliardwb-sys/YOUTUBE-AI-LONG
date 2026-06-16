@@ -219,6 +219,34 @@ POST /projects/{id}/jobs/generate_all
 }
 ```
 
+### POST /jobs/{job_id}/cancel
+
+Отменяет `queued` или `running` job.
+
+В текущем MVP отмена кооперативная: backend помечает job как `cancelled`, а локальный runner останавливается перед следующим шагом pipeline. Уже начатый тяжёлый шаг не прерывается силой, потому что текущая очередь работает через локальный `ThreadPoolExecutor`, а не через отдельный production worker.
+
+Ответ:
+
+```json
+{
+  "id": "job_...",
+  "project_id": "project_...",
+  "type": "generate_all",
+  "status": "cancelled",
+  "progress": 30,
+  "current_step": "cancelled",
+  "error": "Job cancelled by user"
+}
+```
+
+Если job уже `completed`, `failed` или `cancelled`, endpoint вернёт `409`.
+
+### POST /jobs/{job_id}/retry
+
+Создаёт новую job того же типа для того же проекта на основе завершённой, failed или cancelled job.
+
+Активные `queued` и `running` jobs нельзя retry-ить; для них endpoint вернёт `409`.
+
 ### GET /projects/{id}/jobs
 
 Возвращает список задач проекта, новые сверху.

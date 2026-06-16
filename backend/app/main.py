@@ -14,7 +14,7 @@ from app.models import JobType, Project, ProjectCreate, ProjectUpdate, SceneCrea
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
 from app.services.compliance_service import ComplianceService
-from app.services.job_service import JobNotFoundError, JobRunner, JobStore
+from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
 from app.services.source_service import SourceService
@@ -369,6 +369,30 @@ def generate_all_queued(project_id: str) -> dict:
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
     return _job_or_404(job_id)
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    try:
+        return job_runner.cancel(job_id).model_dump(mode="json")
+    except (InvalidIdentifierError, UnsafePathError):
+        raise HTTPException(status_code=404, detail="Job not found") from None
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found") from None
+    except JobNotCancellableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(job_id: str) -> dict:
+    try:
+        return job_runner.retry(job_id).model_dump(mode="json")
+    except (InvalidIdentifierError, UnsafePathError):
+        raise HTTPException(status_code=404, detail="Job not found") from None
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found") from None
+    except JobNotRetryableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @app.get("/projects/{project_id}/jobs")

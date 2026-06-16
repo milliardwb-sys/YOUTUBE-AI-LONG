@@ -196,6 +196,13 @@ curl -X POST http://localhost:8000/projects/<project_id>/generate-all-queued
 curl http://localhost:8000/jobs/<job_id>
 ```
 
+Отменить или повторить job:
+
+```bash
+curl -X POST http://localhost:8000/jobs/<job_id>/cancel
+curl -X POST http://localhost:8000/jobs/<job_id>/retry
+```
+
 Ответ:
 
 ```json

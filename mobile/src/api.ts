@@ -85,6 +85,24 @@ export async function getJob(jobId: string): Promise<ProjectJob> {
   return response.json();
 }
 
+export async function cancelJob(jobId: string): Promise<ProjectJob> {
+  const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/cancel`, {
+    method: 'POST',
+    headers: headers(),
+  });
+  await assertOk(response, 'Cancel job');
+  return response.json();
+}
+
+export async function retryJob(jobId: string): Promise<ProjectJob> {
+  const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/retry`, {
+    method: 'POST',
+    headers: headers(),
+  });
+  await assertOk(response, 'Retry job');
+  return response.json();
+}
+
 export async function getProject(projectId: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}`, { headers: headers() });
   await assertOk(response, 'Get project');

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Button, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { createProject, delay, getJob, getProject, startProjectJob } from './src/api';
+import { cancelJob, createProject, delay, getJob, getProject, retryJob, startProjectJob } from './src/api';
 import type { Project, ProjectJob } from './src/types';
 
 export default function App() {
@@ -31,20 +31,7 @@ export default function App() {
 
       const queuedJob = await startProjectJob(created.id, 'generate_all');
       setJob(queuedJob);
-
-      let currentJob = queuedJob;
-      while (currentJob.status === 'queued' || currentJob.status === 'running') {
-        await delay(1000);
-        currentJob = await getJob(queuedJob.id);
-        setJob(currentJob);
-        setProject(await getProject(created.id));
-      }
-
-      const finalProject = await getProject(created.id);
-      setProject(finalProject);
-      if (currentJob.status === 'failed') {
-        setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
-      }
+      await pollJob(created.id, queuedJob);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -52,7 +39,58 @@ export default function App() {
     }
   }
 
+  async function pollJob(projectId: string, initialJob: ProjectJob) {
+    let currentJob = initialJob;
+    while (currentJob.status === 'queued' || currentJob.status === 'running') {
+      await delay(1000);
+      currentJob = await getJob(initialJob.id);
+      setJob(currentJob);
+      setProject(await getProject(projectId));
+    }
+
+    const finalProject = await getProject(projectId);
+    setProject(finalProject);
+    if (currentJob.status === 'failed') {
+      setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
+    }
+    if (currentJob.status === 'cancelled') {
+      setError(currentJob.error ?? 'Generation job cancelled');
+    }
+  }
+
+  async function handleCancelJob() {
+    if (!job) return;
+    setError(null);
+    try {
+      const cancelled = await cancelJob(job.id);
+      setJob(cancelled);
+      if (project) {
+        setProject(await getProject(project.id));
+      }
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cancel failed');
+    }
+  }
+
+  async function handleRetryJob() {
+    if (!job || !project) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const retried = await retryJob(job.id);
+      setJob(retried);
+      await pollJob(project.id, retried);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const progress = job?.progress ?? (loading ? 2 : 0);
+  const canCancel = job?.status === 'queued' || job?.status === 'running';
+  const canRetry = job?.status === 'failed' || job?.status === 'cancelled';
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -96,6 +134,8 @@ export default function App() {
         />
 
         <Button title="Создать ролик через job queue" onPress={handleGenerate} disabled={loading || topic.trim().length < 5} />
+        {canCancel ? <Button title="Отменить job" onPress={handleCancelJob} /> : null}
+        {canRetry ? <Button title="Повторить job" onPress={handleRetryJob} disabled={loading} /> : null}
 
         {loading && (
           <View style={styles.loading}>

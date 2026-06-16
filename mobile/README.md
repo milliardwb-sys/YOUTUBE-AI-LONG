@@ -11,6 +11,8 @@
 - включить/выключить burned subtitles flag;
 - запустить `generate_all` как backend job;
 - опрашивать `GET /jobs/{job_id}`;
+- отменить активную job через `POST /jobs/{job_id}/cancel`;
+- повторить failed/cancelled job через `POST /jobs/{job_id}/retry`;
 - показать progress, статус, warnings, источники, сцены и ссылки на результат.
 
 Запуск:

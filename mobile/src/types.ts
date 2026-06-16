@@ -8,9 +8,10 @@ export type ProjectStatus =
   | 'voice_ready'
   | 'rendering'
   | 'completed'
+  | 'cancelled'
   | 'failed';
 
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
 export type JobType =
   | 'generate_script'
   | 'collect_sources'

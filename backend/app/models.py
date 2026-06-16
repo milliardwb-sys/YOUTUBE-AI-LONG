@@ -20,6 +20,7 @@ class ProjectStatus(str, Enum):
     voice_ready = "voice_ready"
     rendering = "rendering"
     completed = "completed"
+    cancelled = "cancelled"
     failed = "failed"
 
 
@@ -64,6 +65,7 @@ class JobStatus(str, Enum):
     queued = "queued"
     running = "running"
     completed = "completed"
+    cancelled = "cancelled"
     failed = "failed"
 
 
@@ -318,3 +320,9 @@ class ProjectJob(BaseModel):
         self.error = error
         self.completed_at = datetime.now(timezone.utc)
         self.touch("failed")
+
+    def mark_cancelled(self, reason: str = "Job cancelled") -> None:
+        self.status = JobStatus.cancelled
+        self.error = reason
+        self.completed_at = datetime.now(timezone.utc)
+        self.touch("cancelled")
