@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from threading import Lock
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -39,6 +40,8 @@ pipeline = VideoPipeline(
 )
 job_store = JobStore(settings)
 job_runner = JobRunner(settings, pipeline, job_store)
+rate_limit_lock = Lock()
+rate_limit_windows: dict[str, tuple[int, int]] = {}
 
 app = FastAPI(
     title="AI Video Studio MVP API",
@@ -74,7 +77,17 @@ async def api_key_middleware(request: Request, call_next):
             response = JSONResponse(status_code=401, content={"detail": "Invalid or missing X-API-Key"})
             response.headers["x-request-id"] = request_id
             return response
+    rate_limit_headers = _check_rate_limit(request)
+    if rate_limit_headers is None:
+        response = JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+        response.headers["x-request-id"] = request_id
+        response.headers["retry-after"] = "60"
+        response.headers["x-ratelimit-limit"] = str(settings.rate_limit_requests_per_minute)
+        response.headers["x-ratelimit-remaining"] = "0"
+        return response
     response = await call_next(request)
+    for header, value in rate_limit_headers.items():
+        response.headers[header] = value
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     response.headers["x-request-id"] = request_id
     logger.info(
@@ -88,6 +101,38 @@ async def api_key_middleware(request: Request, call_next):
         },
     )
     return response
+
+
+def _rate_limit_key(request: Request) -> str:
+    if request.headers.get("x-api-key"):
+        return f"api:{request.headers['x-api-key']}"
+    if request.client and request.client.host:
+        return f"ip:{request.client.host}"
+    return "ip:unknown"
+
+
+def _check_rate_limit(request: Request) -> dict[str, str] | None:
+    limit = settings.rate_limit_requests_per_minute
+    if limit <= 0:
+        return {}
+    now = int(time.time())
+    window = now // 60
+    key = _rate_limit_key(request)
+    with rate_limit_lock:
+        current_window, count = rate_limit_windows.get(key, (window, 0))
+        if current_window != window:
+            current_window, count = window, 0
+        if count >= limit:
+            return None
+        count += 1
+        rate_limit_windows[key] = (current_window, count)
+        remaining = max(0, limit - count)
+    reset = ((window + 1) * 60) - now
+    return {
+        "x-ratelimit-limit": str(limit),
+        "x-ratelimit-remaining": str(remaining),
+        "x-ratelimit-reset": str(reset),
+    }
 
 
 def _get_project_or_404(project_id: str) -> Project:
@@ -178,6 +223,7 @@ def health() -> dict[str, str | bool | int]:
         "job_workers": settings.job_workers,
         "auth_required": bool(settings.api_key),
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
+        "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
     }
 
 
@@ -211,6 +257,7 @@ def diagnostics() -> dict:
         },
         "auth_required": bool(settings.api_key),
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
+        "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
         "cors_origins": settings.cors_origins,
         "browser_screenshots": {
             "enabled": settings.enable_browser_screenshots,

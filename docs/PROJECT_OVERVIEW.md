@@ -176,6 +176,7 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 - FFmpeg MP4 render.
 - YouTube metadata/export package.
 - API key protection.
+- In-memory API rate limiting через `RATE_LIMIT_REQUESTS_PER_MINUTE`.
 - Docker/Compose backend scaffold.
 - GitHub Actions CI.
 
@@ -185,6 +186,7 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 - Нет Redis/Celery/RQ/Temporal.
 - Нет user accounts и project ownership.
 - Нет billing/limits.
+- Нет внешнего API Gateway rate limiting; встроенный limiter годится как MVP-защита.
 - Нет real avatar provider.
 - Нет voice consent flow.
 - Нет real search/research provider.

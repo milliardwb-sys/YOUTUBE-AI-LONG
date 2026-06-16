@@ -12,6 +12,25 @@ http://localhost:8000
 
 Если `APP_ENV` не `local`, `test`, `dev` или `development`, backend требует настроенный `API_KEY` для приватных endpoints. Без ключа приватные routes возвращают `403`, чтобы production-сервер нельзя было случайно запустить открытым.
 
+## Rate limiting
+
+Встроенный in-memory limiter включается через:
+
+```text
+RATE_LIMIT_REQUESTS_PER_MINUTE=120
+```
+
+`0` отключает limiter. Лимит считается на минутное окно по `X-API-Key`, если он передан, иначе по IP клиента. При превышении backend возвращает `429` и headers:
+
+```text
+X-RateLimit-Limit
+X-RateLimit-Remaining
+X-RateLimit-Reset
+Retry-After
+```
+
+Для полноценного production лучше дополнительно использовать внешний API Gateway / reverse proxy limiter.
+
 ## Error contract
 
 Синхронные pipeline endpoints возвращают HTTP-ошибку, если шаг не выполнен: `400` для compliance, `404` для not found, `409` для precondition failure и `500` для runtime/render/provider failure. Job endpoints отдают ошибки через `GET /jobs/{job_id}`.

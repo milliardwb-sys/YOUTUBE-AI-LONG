@@ -47,6 +47,7 @@ def make_settings(tmp_path: Path) -> Settings:
         run_jobs_inline=True,
         job_workers=1,
         api_key=None,
+        rate_limit_requests_per_minute=0,
         cors_origins=["http://localhost:19006"],
         allow_unsafe_http_sources=False,
         allow_private_source_urls=False,
@@ -269,6 +270,14 @@ def test_get_settings_uses_default_for_invalid_openai_temperature(tmp_path, monk
     assert settings.openai_temperature == 0.55
 
 
+def test_get_settings_parses_rate_limit(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "12")
+    settings = get_settings()
+
+    assert settings.rate_limit_requests_per_minute == 12
+
+
 def test_api_import_and_delete_smoke(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RUN_JOBS_INLINE", "true")
@@ -304,6 +313,25 @@ def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     assert client.get("/diagnostics").status_code == 401
     assert client.get("/projects", headers={"x-api-key": "secret"}).status_code == 200
     assert client.get("/diagnostics", headers={"x-api-key": "secret"}).status_code == 200
+
+
+def test_api_rate_limit_returns_429(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "2")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    first = client.get("/health")
+    second = client.get("/health")
+    third = client.get("/health")
+
+    assert first.status_code == 200
+    assert first.headers["x-ratelimit-limit"] == "2"
+    assert second.status_code == 200
+    assert third.status_code == 429
 
 
 def test_production_requires_api_key_for_private_routes(tmp_path, monkeypatch):
