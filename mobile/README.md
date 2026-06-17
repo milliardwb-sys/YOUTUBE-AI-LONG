@@ -14,6 +14,8 @@
 - отменить активную job через `POST /jobs/{job_id}/cancel`;
 - повторить failed/cancelled job через `POST /jobs/{job_id}/retry`;
 - войти или зарегистрироваться через backend auth, если включён `ENABLE_USER_AUTH=true`;
+- загрузить список проектов через `GET /projects`;
+- открыть старый проект и его readiness manifest;
 - показать progress, статус, warnings, источники, сцены и ссылки на результат.
 
 Запуск:

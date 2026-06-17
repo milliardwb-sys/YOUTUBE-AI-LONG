@@ -106,6 +106,12 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
   return response.json();
 }
 
+export async function listProjects(): Promise<Project[]> {
+  const response = await fetch(`${API_BASE_URL}/projects`, { headers: headers() });
+  await assertOk(response, 'List projects');
+  return response.json();
+}
+
 export async function generateAll(projectId: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/generate-all`, {
     method: 'POST',

@@ -8,6 +8,7 @@ import {
   getJob,
   getProject,
   getProjectManifest,
+  listProjects,
   loginUser,
   logoutUser,
   registerUser,
@@ -24,10 +25,12 @@ export default function App() {
   const [useTtsVoice, setUseTtsVoice] = useState(false);
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [job, setJob] = useState<ProjectJob | null>(null);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
   const [loading, setLoading] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<UserPublic | null>(null);
   const [authEmail, setAuthEmail] = useState('owner@example.com');
@@ -47,6 +50,7 @@ export default function App() {
         burnSubtitles,
       });
       setProject(created);
+      await refreshProjects();
 
       const queuedJob = await startProjectJob(created.id, 'generate_all');
       setJob(queuedJob);
@@ -66,6 +70,7 @@ export default function App() {
         ? await loginUser(authEmail.trim(), authPassword)
         : await registerUser(authEmail.trim(), authPassword);
       setAuthUser(payload.user);
+      await refreshProjects();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Auth failed');
     } finally {
@@ -83,10 +88,37 @@ export default function App() {
     } finally {
       setAccessToken(null);
       setAuthUser(null);
+      setProjects([]);
       setProject(null);
       setJob(null);
       setManifest(null);
       setAuthBusy(false);
+    }
+  }
+
+  async function refreshProjects() {
+    setProjectsLoading(true);
+    try {
+      setProjects(await listProjects());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Load projects failed');
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  async function handleOpenProject(projectId: string) {
+    setLoading(true);
+    setError(null);
+    setJob(null);
+    try {
+      const selected = await getProject(projectId);
+      setProject(selected);
+      setManifest(await getProjectManifest(projectId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Open project failed');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -102,6 +134,7 @@ export default function App() {
     const finalProject = await getProject(projectId);
     setProject(finalProject);
     setManifest(await getProjectManifest(projectId));
+    await refreshProjects();
     if (currentJob.status === 'failed') {
       setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
     }
@@ -119,6 +152,7 @@ export default function App() {
       if (project) {
         setProject(await getProject(project.id));
         setManifest(await getProjectManifest(project.id));
+        await refreshProjects();
       }
       setLoading(false);
     } catch (err) {
@@ -200,6 +234,29 @@ export default function App() {
           style={styles.input}
           placeholder="Введите тему YouTube-ролика"
         />
+
+        <View style={styles.projectListPanel}>
+          <View style={styles.authRow}>
+            <Text style={styles.sectionTitle}>Projects</Text>
+            <Button title={projectsLoading ? 'Loading' : 'Refresh'} onPress={refreshProjects} disabled={projectsLoading || loading} />
+          </View>
+          {projects.length === 0 ? (
+            <Text style={styles.emptyText}>No projects loaded</Text>
+          ) : (
+            projects.slice(0, 8).map((item) => (
+              <View key={item.id} style={styles.projectListItem}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.projectListTitle}>{item.topic}</Text>
+                  <Text style={styles.projectListMeta}>
+                    {item.status} · {item.current_step}
+                  </Text>
+                  {item.updated_at ? <Text style={styles.projectListMeta}>{new Date(item.updated_at).toLocaleString()}</Text> : null}
+                </View>
+                <Button title="Open" onPress={() => handleOpenProject(item.id)} disabled={loading} />
+              </View>
+            ))
+          )}
+        </View>
 
         <OptionRow
           title="Официальные сайты + AI-слайды"
@@ -324,6 +381,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 30, fontWeight: '800', color: 'white' },
   subtitle: { fontSize: 16, color: '#c8d0ee' },
   authPanel: { backgroundColor: '#1d2440', borderRadius: 8, padding: 14, gap: 10 },
+  projectListPanel: { backgroundColor: '#162034', borderRadius: 8, padding: 14, gap: 10 },
   sectionTitle: { color: 'white', fontWeight: '800', fontSize: 16 },
   authRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   authText: { color: '#e5e7eb', fontWeight: '700', flex: 1 },
@@ -336,6 +394,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  emptyText: { color: '#c8d0ee' },
+  projectListItem: {
+    backgroundColor: '#eef2ff',
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  projectListTitle: { color: '#111827', fontWeight: '800' },
+  projectListMeta: { color: '#475569', marginTop: 2, fontSize: 12 },
   label: { color: 'white', fontWeight: '700', marginTop: 16 },
   input: {
     minHeight: 110,

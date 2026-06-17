@@ -138,6 +138,8 @@ export type Project = {
     export_package_url?: string | null;
     warnings?: string[];
   };
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type UserPublic = {
