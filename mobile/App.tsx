@@ -1,8 +1,20 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Button, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { cancelJob, createProject, delay, getJob, getProject, getProjectManifest, retryJob, startProjectJob } from './src/api';
-import type { Project, ProjectJob, ProjectManifest } from './src/types';
+import {
+  cancelJob,
+  createProject,
+  delay,
+  getJob,
+  getProject,
+  getProjectManifest,
+  loginUser,
+  registerUser,
+  retryJob,
+  setAccessToken,
+  startProjectJob,
+} from './src/api';
+import type { Project, ProjectJob, ProjectManifest, UserPublic } from './src/types';
 
 export default function App() {
   const [topic, setTopic] = useState('5 AI-сервисов для создания видео в 2026 году');
@@ -14,7 +26,11 @@ export default function App() {
   const [job, setJob] = useState<ProjectJob | null>(null);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
   const [loading, setLoading] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<UserPublic | null>(null);
+  const [authEmail, setAuthEmail] = useState('owner@example.com');
+  const [authPassword, setAuthPassword] = useState('strong-password');
 
   async function handleGenerate() {
     setLoading(true);
@@ -39,6 +55,30 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleAuth(action: 'login' | 'register') {
+    setAuthBusy(true);
+    setError(null);
+    try {
+      const payload = action === 'login'
+        ? await loginUser(authEmail.trim(), authPassword)
+        : await registerUser(authEmail.trim(), authPassword);
+      setAuthUser(payload.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Auth failed');
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  function handleLogout() {
+    setAccessToken(null);
+    setAuthUser(null);
+    setProject(null);
+    setJob(null);
+    setManifest(null);
+    setError(null);
   }
 
   async function pollJob(projectId: string, initialJob: ProjectJob) {
@@ -103,6 +143,45 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>AI Video Studio MVP v0.4</Text>
         <Text style={styles.subtitle}>Тема → job queue → сценарий → источники → голос → слайды → MP4</Text>
+        <View style={styles.authPanel}>
+          <Text style={styles.sectionTitle}>Account</Text>
+          {authUser ? (
+            <View style={styles.authRow}>
+              <Text style={styles.authText}>{authUser.email}</Text>
+              <Button title="Logout" onPress={handleLogout} />
+            </View>
+          ) : (
+            <>
+              <TextInput
+                value={authEmail}
+                onChangeText={setAuthEmail}
+                style={styles.compactInput}
+                placeholder="email"
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+              <TextInput
+                value={authPassword}
+                onChangeText={setAuthPassword}
+                style={styles.compactInput}
+                placeholder="password"
+                secureTextEntry
+              />
+              <View style={styles.buttonRow}>
+                <Button
+                  title="Login"
+                  onPress={() => handleAuth('login')}
+                  disabled={authBusy || authEmail.trim().length < 3 || authPassword.length < 1}
+                />
+                <Button
+                  title="Register"
+                  onPress={() => handleAuth('register')}
+                  disabled={authBusy || authEmail.trim().length < 3 || authPassword.length < 8}
+                />
+              </View>
+            </>
+          )}
+        </View>
 
         <Text style={styles.label}>Тема ролика</Text>
         <TextInput
@@ -235,6 +314,19 @@ const styles = StyleSheet.create({
   container: { padding: 24, gap: 16 },
   title: { fontSize: 30, fontWeight: '800', color: 'white' },
   subtitle: { fontSize: 16, color: '#c8d0ee' },
+  authPanel: { backgroundColor: '#1d2440', borderRadius: 8, padding: 14, gap: 10 },
+  sectionTitle: { color: 'white', fontWeight: '800', fontSize: 16 },
+  authRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  authText: { color: '#e5e7eb', fontWeight: '700', flex: 1 },
+  compactInput: {
+    backgroundColor: 'white',
+    color: '#111827',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  buttonRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   label: { color: 'white', fontWeight: '700', marginTop: 16 },
   input: {
     minHeight: 110,

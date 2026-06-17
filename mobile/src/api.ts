@@ -1,4 +1,4 @@
-import type { JobEvent, JobType, Project, ProjectJob, ProjectManifest } from './types';
+import type { AuthToken, JobEvent, JobType, Project, ProjectJob, ProjectManifest, UserPublic } from './types';
 
 declare const process: {
   env?: Record<string, string | undefined>;
@@ -6,6 +6,7 @@ declare const process: {
 
 const API_BASE_URL = process.env?.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
 const API_KEY = process.env?.EXPO_PUBLIC_API_KEY;
+let accessToken: string | null = null;
 
 export type CreateProjectOptions = {
   topic: string;
@@ -33,8 +34,43 @@ type ApiHeaders = Record<string, string>;
 function headers(extra?: ApiHeaders): ApiHeaders {
   return {
     ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...(extra ?? {}),
   };
+}
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
+export async function registerUser(email: string, password: string): Promise<AuthToken> {
+  const response = await fetch(`${API_BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ email, password }),
+  });
+  await assertOk(response, 'Register');
+  const payload = await response.json();
+  setAccessToken(payload.access_token);
+  return payload;
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthToken> {
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ email, password }),
+  });
+  await assertOk(response, 'Login');
+  const payload = await response.json();
+  setAccessToken(payload.access_token);
+  return payload;
+}
+
+export async function getCurrentUser(): Promise<UserPublic> {
+  const response = await fetch(`${API_BASE_URL}/auth/me`, { headers: headers() });
+  await assertOk(response, 'Get current user');
+  return response.json();
 }
 
 export async function createProject(options: CreateProjectOptions): Promise<Project> {

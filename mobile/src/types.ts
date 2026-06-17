@@ -24,6 +24,7 @@ export type JobType =
 export type ProjectJob = {
   id: string;
   project_id: string;
+  owner_id?: string | null;
   type: JobType;
   status: JobStatus;
   progress: number;
@@ -108,6 +109,7 @@ export type Scene = {
 
 export type Project = {
   id: string;
+  owner_id?: string | null;
   topic: string;
   duration_minutes: number;
   status: ProjectStatus;
@@ -136,4 +138,18 @@ export type Project = {
     export_package_url?: string | null;
     warnings?: string[];
   };
+};
+
+export type UserPublic = {
+  id: string;
+  email: string;
+  name?: string | null;
+  created_at: string;
+};
+
+export type AuthToken = {
+  access_token: string;
+  token_type: 'bearer';
+  expires_at: string;
+  user: UserPublic;
 };
