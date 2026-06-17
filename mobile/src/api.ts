@@ -73,6 +73,15 @@ export async function getCurrentUser(): Promise<UserPublic> {
   return response.json();
 }
 
+export async function logoutUser(): Promise<{ revoked: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: 'POST',
+    headers: headers(),
+  });
+  await assertOk(response, 'Logout');
+  return response.json();
+}
+
 export async function createProject(options: CreateProjectOptions): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/projects`, {
     method: 'POST',

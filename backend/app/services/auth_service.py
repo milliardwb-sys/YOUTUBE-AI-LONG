@@ -83,6 +83,38 @@ class AuthService:
                 return user
         raise SessionNotFoundError("Session not found")
 
+    def revoke_token(self, token: str) -> bool:
+        token_hash = _hash_token(token)
+        with self._lock:
+            for path in sorted(self.sessions_dir.glob("session_*.json")):
+                try:
+                    session = UserSession.model_validate(read_json(path))
+                except Exception:
+                    continue
+                if hmac.compare_digest(session.token_hash, token_hash):
+                    path.unlink(missing_ok=True)
+                    return True
+        return False
+
+    def cleanup_expired_sessions(self) -> dict[str, int]:
+        now = datetime.now(timezone.utc)
+        removed = 0
+        skipped = 0
+        with self._lock:
+            for path in sorted(self.sessions_dir.glob("session_*.json")):
+                try:
+                    session = UserSession.model_validate(read_json(path))
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+                    continue
+                if session.expires_at <= now:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+                else:
+                    skipped += 1
+        return {"removed_sessions": removed, "skipped_sessions": skipped}
+
     def get_user(self, user_id: str) -> PlatformUser:
         path = self._user_file(user_id)
         if not path.exists():

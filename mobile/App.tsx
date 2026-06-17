@@ -9,6 +9,7 @@ import {
   getProject,
   getProjectManifest,
   loginUser,
+  logoutUser,
   registerUser,
   retryJob,
   setAccessToken,
@@ -72,13 +73,21 @@ export default function App() {
     }
   }
 
-  function handleLogout() {
-    setAccessToken(null);
-    setAuthUser(null);
-    setProject(null);
-    setJob(null);
-    setManifest(null);
+  async function handleLogout() {
+    setAuthBusy(true);
     setError(null);
+    try {
+      await logoutUser();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Logout failed');
+    } finally {
+      setAccessToken(null);
+      setAuthUser(null);
+      setProject(null);
+      setJob(null);
+      setManifest(null);
+      setAuthBusy(false);
+    }
   }
 
   async function pollJob(projectId: string, initialJob: ProjectJob) {
@@ -148,7 +157,7 @@ export default function App() {
           {authUser ? (
             <View style={styles.authRow}>
               <Text style={styles.authText}>{authUser.email}</Text>
-              <Button title="Logout" onPress={handleLogout} />
+              <Button title="Logout" onPress={handleLogout} disabled={authBusy} />
             </View>
           ) : (
             <>

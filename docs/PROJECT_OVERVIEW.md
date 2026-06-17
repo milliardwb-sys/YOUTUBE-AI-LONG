@@ -34,7 +34,7 @@
 Backend запускается как FastAPI API. Основные endpoint-группы:
 
 - `/health`, `/ready`, `/diagnostics` — диагностика.
-- `/auth/register`, `/auth/login`, `/auth/me` — optional bearer-token auth when `ENABLE_USER_AUTH=true`.
+- `/auth/register`, `/auth/login`, `/auth/me`, `/auth/logout` — optional bearer-token auth when `ENABLE_USER_AUTH=true`.
 - `/stats` — статистика проектов, job queue и локального storage.
 - `/providers` — доступные AI/render/source режимы.
 - `/projects` — создание, чтение, обновление и удаление проектов.

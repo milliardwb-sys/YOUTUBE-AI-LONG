@@ -4,6 +4,7 @@ import importlib
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -11,9 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import ConfigurationError, Settings, get_settings
-from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, VisualMode, VoiceProviderName
+from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, UserCreate, UserSession, VisualMode, VoiceProviderName
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
+from app.services.auth_service import AuthService, SessionNotFoundError
 from app.services.compliance_service import ComplianceService
 from app.services.job_service import JobNotCancellableError, JobRunner, JobStore
 from app.services.render_service import RenderService
@@ -411,6 +413,36 @@ def test_user_auth_register_login_and_me(tmp_path, monkeypatch):
     me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["email"] == "owner@example.com"
+
+    logout = client.post("/auth/logout", headers={"Authorization": f"Bearer {token}"})
+    assert logout.status_code == 200
+    assert logout.json()["revoked"] is True
+    assert client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
+def test_auth_service_revokes_and_cleans_expired_sessions(tmp_path):
+    settings = make_settings(tmp_path)
+    settings = Settings(**{**settings.__dict__, "enable_user_auth": True})
+    auth = AuthService(settings)
+    issued = auth.register(UserCreate(email="cleanup@example.com", password="strong-password"))
+
+    assert auth.get_user_by_token(issued.access_token).email == "cleanup@example.com"
+    assert auth.revoke_token(issued.access_token) is True
+    with pytest.raises(SessionNotFoundError):
+        auth.get_user_by_token(issued.access_token)
+
+    user = auth.find_user_by_email("cleanup@example.com")
+    assert user is not None
+    expired = UserSession(
+        user_id=user.id,
+        token_hash="expired-session-token-hash",
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+    auth._save_session(expired)
+
+    cleanup = auth.cleanup_expired_sessions()
+    assert cleanup["removed_sessions"] == 1
+    assert cleanup["skipped_sessions"] == 0
 
 
 def test_user_auth_isolates_projects_jobs_and_files(tmp_path, monkeypatch):

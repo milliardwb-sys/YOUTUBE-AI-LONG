@@ -33,9 +33,12 @@ Authorization: Bearer <access_token>
 POST /auth/register
 POST /auth/login
 GET /auth/me
+POST /auth/logout
 ```
 
 Новые проекты получают `owner_id`; список проектов фильтруется по текущему пользователю; чужие projects/jobs/files возвращают `404`. Это MVP file-backed auth foundation. Для production всё ещё нужны managed auth/OIDC, organizations, roles, audit logs и database-backed sessions.
+
+`POST /auth/logout` revokes the current bearer session. `POST /maintenance/cleanup` also removes expired auth session files and returns `removed_sessions` / `skipped_sessions`.
 
 ## Rate limiting
 

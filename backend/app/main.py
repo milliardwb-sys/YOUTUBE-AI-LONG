@@ -483,6 +483,15 @@ def auth_me(request: Request) -> dict:
     return user.public().model_dump(mode="json") if user else {}
 
 
+@app.post("/auth/logout")
+def logout_user(request: Request) -> dict:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="User auth is disabled")
+    _current_user(request)
+    token = _bearer_token(request)
+    return {"revoked": auth_service.revoke_token(token or "")}
+
+
 @app.get("/providers")
 def providers() -> dict:
     return {
@@ -527,6 +536,7 @@ def cleanup() -> dict:
     return {
         **store.cleanup_old_projects(),
         **job_store.cleanup_old_jobs(),
+        **auth_service.cleanup_expired_sessions(),
         "retention_days": settings.cleanup_retention_days,
     }
 
