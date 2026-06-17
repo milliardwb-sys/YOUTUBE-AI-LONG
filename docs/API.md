@@ -14,6 +14,29 @@ http://localhost:8000
 
 Если `API_KEY` задан в non-local окружении, backend отклоняет известные placeholder-значения и секреты короче 32 символов.
 
+Optional user auth включается через:
+
+```text
+ENABLE_USER_AUTH=true
+ACCESS_TOKEN_TTL_MINUTES=1440
+```
+
+Когда `ENABLE_USER_AUTH=true`, project, job и project file endpoints требуют:
+
+```text
+Authorization: Bearer <access_token>
+```
+
+Доступные auth endpoints:
+
+```text
+POST /auth/register
+POST /auth/login
+GET /auth/me
+```
+
+Новые проекты получают `owner_id`; список проектов фильтруется по текущему пользователю; чужие projects/jobs/files возвращают `404`. Это MVP file-backed auth foundation. Для production всё ещё нужны managed auth/OIDC, organizations, roles, audit logs и database-backed sessions.
+
 ## Rate limiting
 
 Встроенный in-memory limiter включается через:
@@ -61,6 +84,7 @@ MAX_REQUEST_BODY_BYTES=2000000
   "run_jobs_inline": false,
   "job_workers": 2,
   "render_timeout_seconds": 1800,
+  "user_auth_enabled": false,
   "max_request_body_bytes": 2000000
 }
 ```

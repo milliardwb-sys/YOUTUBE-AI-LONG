@@ -7,6 +7,7 @@ Backend API / FastAPI
   ↓
 ProjectStore / local JSON files
 JobStore / local JSON files
+AuthService / local JSON users + sessions
   ↓
 JobRunner / ThreadPoolExecutor
   ↓
@@ -34,6 +35,7 @@ VideoPipeline
 - JSON-файлы пишутся атомарно через temp-file + replace;
 - `/files/{path}` работает как контролируемый endpoint, а не raw static mount;
 - `API_KEY` опционально защищает непубличные routes через `X-API-Key`;
+- `ENABLE_USER_AUTH=true` включает bearer-token auth, `owner_id` у projects/jobs и user-scoped доступ к project files;
 - source URLs проверяются перед browser screenshots, private/local networks заблокированы по умолчанию.
 
 ## Зачем v0.4
@@ -68,6 +70,7 @@ app/models.py       — Pydantic-модели проекта, сцен, исто
 app/storage.py      — локальное JSON-хранилище проектов + scene editor operations
 app/pipeline.py     — оркестрация шагов генерации
 app/main.py         — FastAPI endpoints
+app/services/auth_service.py — file-backed users, PBKDF2 password hashes and bearer sessions
 ```
 
 Сервисы:
@@ -213,6 +216,13 @@ Jobs:
 
 ```text
 backend/data/projects/_jobs/job_*.json
+```
+
+Auth data:
+
+```text
+backend/data/projects/_auth/users/user_*.json
+backend/data/projects/_auth/sessions/session_*.json
 ```
 
 Файлы результата:

@@ -48,6 +48,8 @@ def make_settings(tmp_path: Path) -> Settings:
         run_jobs_inline=True,
         job_workers=1,
         api_key=None,
+        enable_user_auth=False,
+        access_token_ttl_minutes=1440,
         rate_limit_requests_per_minute=0,
         cors_origins=["http://localhost:19006"],
         allow_unsafe_http_sources=False,
@@ -383,6 +385,101 @@ def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     assert client.get("/diagnostics").status_code == 401
     assert client.get("/projects", headers={"x-api-key": api_key}).status_code == 200
     assert client.get("/diagnostics", headers={"x-api-key": api_key}).status_code == 200
+
+
+def test_user_auth_register_login_and_me(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    register = client.post(
+        "/auth/register",
+        json={"email": "Owner@example.com", "password": "strong-password", "name": "Owner"},
+    )
+    assert register.status_code == 200
+    assert register.json()["user"]["email"] == "owner@example.com"
+    assert register.json()["token_type"] == "bearer"
+
+    login = client.post("/auth/login", json={"email": "owner@example.com", "password": "strong-password"})
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200
+    assert me.json()["email"] == "owner@example.com"
+
+
+def test_user_auth_isolates_projects_jobs_and_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    alice = client.post(
+        "/auth/register",
+        json={"email": "alice@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    bob = client.post(
+        "/auth/register",
+        json={"email": "bob@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    alice_headers = {"Authorization": f"Bearer {alice}"}
+    bob_headers = {"Authorization": f"Bearer {bob}"}
+
+    missing_auth = client.get("/projects")
+    assert missing_auth.status_code == 401
+
+    created = client.post("/projects", json={"topic": "Auth isolated video project"}, headers=alice_headers)
+    assert created.status_code == 200
+    project_id = created.json()["id"]
+    assert created.json()["owner_id"]
+
+    assert client.get(f"/projects/{project_id}", headers=alice_headers).status_code == 200
+    assert client.get(f"/projects/{project_id}", headers=bob_headers).status_code == 404
+    assert client.get("/projects", headers=bob_headers).json() == []
+
+    project_dir = main.store.project_dir(project_id)
+    artifact = project_dir / "artifact.txt"
+    artifact.write_text("private artifact", encoding="utf-8")
+    alice_file = client.get(f"/files/{project_id}/artifact.txt", headers=alice_headers)
+    bob_file = client.get(f"/files/{project_id}/artifact.txt", headers=bob_headers)
+    assert alice_file.status_code == 200
+    assert alice_file.text == "private artifact"
+    assert bob_file.status_code == 404
+
+    job = main.job_store.create(project_id, JobType.render, owner_id=created.json()["owner_id"])
+    assert client.get(f"/jobs/{job.id}", headers=alice_headers).status_code == 200
+    assert client.get(f"/jobs/{job.id}", headers=bob_headers).status_code == 404
+
+
+def test_api_key_and_user_auth_are_both_required_when_enabled(tmp_path, monkeypatch):
+    api_key = "prod-api-key-with-more-than-thirty-two-characters"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("API_KEY", api_key)
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    auth = client.post(
+        "/auth/register",
+        json={"email": "both@example.com", "password": "strong-password"},
+    )
+    assert auth.status_code == 200
+    token = auth.json()["access_token"]
+
+    assert client.get("/projects", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert client.get("/projects", headers={"x-api-key": api_key}).status_code == 401
+    ok = client.get("/projects", headers={"x-api-key": api_key, "Authorization": f"Bearer {token}"})
+    assert ok.status_code == 200
 
 
 def test_api_stats_endpoint(tmp_path, monkeypatch):

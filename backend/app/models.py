@@ -79,6 +79,70 @@ class JobType(str, Enum):
     generate_all = "generate_all"
 
 
+class UserCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=8, max_length=256)
+    name: str | None = Field(default=None, max_length=120)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        clean = value.strip().lower()
+        if "@" not in clean or clean.startswith("@") or clean.endswith("@"):
+            raise ValueError("email must be a valid email address")
+        return clean
+
+    @field_validator("name")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str | None:
+        return value.strip() if value else None
+
+
+class UserLogin(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class UserPublic(BaseModel):
+    id: str
+    email: str
+    name: str | None = None
+    created_at: datetime
+
+
+class AuthToken(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_at: datetime
+    user: UserPublic
+
+
+class PlatformUser(BaseModel):
+    id: str = Field(default_factory=lambda: f"user_{uuid4().hex[:12]}")
+    email: str
+    name: str | None = None
+    password_hash: str
+    disabled: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def public(self) -> UserPublic:
+        return UserPublic(id=self.id, email=self.email, name=self.name, created_at=self.created_at)
+
+
+class UserSession(BaseModel):
+    id: str = Field(default_factory=lambda: f"session_{uuid4().hex[:12]}")
+    user_id: str
+    token_hash: str
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class SourceCandidate(BaseModel):
     id: str = Field(default_factory=lambda: f"source_{uuid4().hex[:8]}")
     name: str
@@ -252,6 +316,8 @@ class ProjectResult(BaseModel):
 
 class Project(BaseModel):
     id: str = Field(default_factory=lambda: f"project_{uuid4().hex[:12]}")
+    owner_id: str | None = None
+    organization_id: str | None = None
     topic: str
     duration_minutes: int
     style: VideoStyle
@@ -286,6 +352,8 @@ class Project(BaseModel):
 class ProjectJob(BaseModel):
     id: str = Field(default_factory=lambda: f"job_{uuid4().hex[:12]}")
     project_id: str
+    owner_id: str | None = None
+    organization_id: str | None = None
     type: JobType
     status: JobStatus = JobStatus.queued
     progress: int = Field(default=0, ge=0, le=100)

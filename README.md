@@ -52,11 +52,14 @@ voice_provider  = placeholder
 ENABLE_BROWSER_SCREENSHOTS = false
 RUN_JOBS_INLINE = false
 API_KEY =
+ENABLE_USER_AUTH = false
 ```
 
 То есть архив можно запустить локально, получить слайды, аудио-заглушку и MP4. Если добавить `OPENAI_API_KEY`, можно включить `script_provider=openai` и `voice_provider=openai`.
 
 Если задать `API_KEY`, все endpoints кроме `/health`, `/ready`, `/providers` и документации требуют заголовок `X-API-Key`. CORS настраивается через `CORS_ORIGINS`.
+
+Если задать `ENABLE_USER_AUTH=true`, backend включает file-backed регистрацию/логин, bearer tokens, `owner_id` у проектов/jobs и изоляцию доступа к project files. Это MVP foundation для multi-user режима; для production всё ещё нужны OIDC/managed auth, роли, организации и audit logs.
 
 Важно для деплоя: если `APP_ENV` не `local`, `test`, `dev` или `development`, backend не будет обслуживать приватные endpoints без `API_KEY` и вернёт `403`. Это защита от случайного публичного запуска открытого API.
 
@@ -114,6 +117,15 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 `APP_ENV=production` без `API_KEY` заблокирует приватные endpoints. Если `API_KEY` задан, backend отклонит известные placeholder-значения и секреты короче 32 символов. `RENDER_TIMEOUT_SECONDS` ограничивает длительность FFmpeg-render, чтобы зависший render не занимал worker бесконечно. Данные проектов сохраняются в Docker volume `backend-projects`.
 
 `MAX_REQUEST_BODY_BYTES` ограничивает размер входящего HTTP body по `Content-Length`. Превышение лимита возвращает `413`.
+
+`ENABLE_USER_AUTH=true` можно включить в `backend/.env.production`, если нужен bearer-token login flow:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <API_KEY>" \
+  -d '{"email":"owner@example.com","password":"strong-password"}'
+```
 
 ## Demo без HTTP
 

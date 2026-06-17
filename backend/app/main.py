@@ -11,9 +11,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.config import get_settings
-from app.models import JobType, Project, ProjectCreate, ProjectUpdate, SceneCreate, ScenePatch, SceneReorder
+from app.models import (
+    JobType,
+    PlatformUser,
+    Project,
+    ProjectCreate,
+    ProjectJob,
+    ProjectUpdate,
+    SceneCreate,
+    ScenePatch,
+    SceneReorder,
+    UserCreate,
+    UserLogin,
+)
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
+from app.services.auth_service import (
+    AuthService,
+    InvalidCredentialsError,
+    SessionNotFoundError,
+    UserAlreadyExistsError,
+)
 from app.services.compliance_service import ComplianceService
 from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
 from app.services.render_service import RenderService
@@ -40,6 +58,7 @@ pipeline = VideoPipeline(
 )
 job_store = JobStore(settings)
 job_runner = JobRunner(settings, pipeline, job_store)
+auth_service = AuthService(settings)
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
 
@@ -83,7 +102,7 @@ async def api_key_middleware(request: Request, call_next):
         response = JSONResponse(status_code=413, content={"detail": "Request body too large"})
         response.headers["x-request-id"] = request_id
         return response
-    public_paths = {"/health", "/ready", "/providers", "/openapi.json"}
+    public_paths = {"/health", "/ready", "/providers", "/openapi.json", "/auth/register", "/auth/login"}
     is_docs_path = request.url.path in {"/docs", "/redoc"} or request.url.path.startswith("/docs/")
     is_public_path = request.url.path in public_paths or is_docs_path
     if settings.app_env not in {"local", "test", "dev", "development"} and not settings.api_key and not is_public_path:
@@ -169,13 +188,63 @@ def _check_rate_limit(request: Request) -> dict[str, str] | None:
     }
 
 
-def _get_project_or_404(project_id: str) -> Project:
+def _auth_enabled() -> bool:
+    return settings.enable_user_auth
+
+
+def _bearer_token(request: Request) -> str | None:
+    value = request.headers.get("authorization") or ""
+    scheme, _, token = value.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _current_user(request: Request) -> PlatformUser | None:
+    token = _bearer_token(request)
+    if not token:
+        if _auth_enabled():
+            raise HTTPException(status_code=401, detail="Missing bearer token")
+        return None
     try:
-        return store.get(project_id)
+        return auth_service.get_user_by_token(token)
+    except (InvalidCredentialsError, SessionNotFoundError):
+        raise HTTPException(status_code=401, detail="Invalid or expired bearer token") from None
+
+
+def _project_is_visible_to_user(project: Project, user: PlatformUser | None) -> bool:
+    if not _auth_enabled():
+        return True
+    if user is None:
+        return False
+    return project.owner_id == user.id
+
+
+def _job_is_visible_to_user(job: ProjectJob, user: PlatformUser | None) -> bool:
+    if not _auth_enabled():
+        return True
+    if user is None:
+        return False
+    if job.owner_id is not None:
+        return job.owner_id == user.id
+    try:
+        project = store.get(job.project_id)
+    except Exception:
+        return False
+    return project.owner_id == user.id
+
+
+def _get_project_or_404(project_id: str, request: Request | None = None) -> Project:
+    try:
+        project = store.get(project_id)
     except (InvalidIdentifierError, UnsafePathError):
         raise HTTPException(status_code=404, detail="Project not found") from None
     except ProjectNotFoundError:
         raise HTTPException(status_code=404, detail="Project not found") from None
+    user = _current_user(request) if request is not None else None
+    if not _project_is_visible_to_user(project, user):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
 
 
 def _with_file_urls(project: Project) -> dict:
@@ -267,13 +336,21 @@ def _project_manifest(project: Project) -> dict:
     }
 
 
-def _job_or_404(job_id: str) -> dict:
+def _get_job_or_404(job_id: str, request: Request | None = None) -> ProjectJob:
     try:
-        return job_store.get(job_id).model_dump(mode="json")
+        job = job_store.get(job_id)
     except (InvalidIdentifierError, UnsafePathError):
         raise HTTPException(status_code=404, detail="Job not found") from None
     except JobNotFoundError:
         raise HTTPException(status_code=404, detail="Job not found") from None
+    user = _current_user(request) if request is not None else None
+    if not _job_is_visible_to_user(job, user):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+def _job_or_404(job_id: str, request: Request | None = None) -> dict:
+    return _get_job_or_404(job_id, request).model_dump(mode="json")
 
 
 def _sync_pipeline_response(project: Project) -> dict:
@@ -305,6 +382,7 @@ def health() -> dict[str, str | bool | int]:
         "job_workers": settings.job_workers,
         "render_timeout_seconds": settings.render_timeout_seconds,
         "auth_required": bool(settings.api_key),
+        "user_auth_enabled": settings.enable_user_auth,
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
         "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
         "max_request_body_bytes": settings.max_request_body_bytes,
@@ -340,6 +418,7 @@ def diagnostics() -> dict:
             "available": bool(ffmpeg_bin),
         },
         "auth_required": bool(settings.api_key),
+        "user_auth_enabled": settings.enable_user_auth,
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
         "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
         "max_request_body_bytes": settings.max_request_body_bytes,
@@ -374,6 +453,34 @@ def _data_dir_is_writable() -> bool:
         return True
     except OSError:
         return False
+
+
+@app.post("/auth/register")
+def register_user(payload: UserCreate) -> dict:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="User auth is disabled")
+    try:
+        return auth_service.register(payload).model_dump(mode="json")
+    except UserAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@app.post("/auth/login")
+def login_user(payload: UserLogin) -> dict:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="User auth is disabled")
+    try:
+        return auth_service.login(payload).model_dump(mode="json")
+    except InvalidCredentialsError:
+        raise HTTPException(status_code=401, detail="Invalid email or password") from None
+
+
+@app.get("/auth/me")
+def auth_me(request: Request) -> dict:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="User auth is disabled")
+    user = _current_user(request)
+    return user.public().model_dump(mode="json") if user else {}
 
 
 @app.get("/providers")
@@ -425,101 +532,104 @@ def cleanup() -> dict:
 
 
 @app.post("/projects")
-def create_project(payload: ProjectCreate) -> dict:
-    project = store.create_project(payload)
+def create_project(payload: ProjectCreate, request: Request) -> dict:
+    user = _current_user(request)
+    project = store.create_project(payload, owner_id=user.id if user else None)
     return _with_file_urls(project)
 
 
 @app.get("/projects")
-def list_projects() -> list[dict]:
-    return [_with_file_urls(project) for project in store.list_projects()]
+def list_projects(request: Request) -> list[dict]:
+    user = _current_user(request)
+    return [_with_file_urls(project) for project in store.list_projects(owner_id=user.id if user else None)]
 
 
 @app.get("/projects/{project_id}")
-def get_project(project_id: str) -> dict:
-    return _with_file_urls(_get_project_or_404(project_id))
+def get_project(project_id: str, request: Request) -> dict:
+    return _with_file_urls(_get_project_or_404(project_id, request))
 
 
 @app.patch("/projects/{project_id}")
-def update_project(project_id: str, payload: ProjectUpdate) -> dict:
-    _get_project_or_404(project_id)
+def update_project(project_id: str, payload: ProjectUpdate, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _with_file_urls(store.update_project(project_id, payload))
 
 
 @app.delete("/projects/{project_id}", status_code=204)
-def delete_project(project_id: str) -> Response:
-    _get_project_or_404(project_id)
+def delete_project(project_id: str, request: Request) -> Response:
+    _get_project_or_404(project_id, request)
     store.delete_project(project_id)
     return Response(status_code=204)
 
 
 @app.post("/projects/{project_id}/duplicate")
-def duplicate_project(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def duplicate_project(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _with_file_urls(store.duplicate_project(project_id))
 
 
 @app.post("/projects/{project_id}/generate-script")
-def generate_script(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def generate_script(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.generate_script(project_id))
 
 
 @app.post("/projects/{project_id}/collect-sources")
-def collect_sources(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def collect_sources(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.collect_sources(project_id))
 
 
 @app.post("/projects/{project_id}/generate-slides")
-def generate_slides(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def generate_slides(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.generate_slides(project_id))
 
 
 @app.post("/projects/{project_id}/generate-voice")
-def generate_voice(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def generate_voice(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.generate_voice(project_id))
 
 
 @app.post("/projects/{project_id}/prepare-avatar")
-def prepare_avatar(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def prepare_avatar(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.prepare_avatar(project_id))
 
 
 @app.post("/projects/{project_id}/render")
-def render(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def render(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.render(project_id))
 
 
 @app.post("/projects/{project_id}/generate-all")
-def generate_all(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def generate_all(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return _sync_pipeline_response(pipeline.generate_all(project_id))
 
 
 @app.post("/projects/{project_id}/jobs/{job_type}")
-def start_project_job(project_id: str, job_type: JobType) -> dict:
-    _get_project_or_404(project_id)
+def start_project_job(project_id: str, job_type: JobType, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return job_runner.start(project_id, job_type).model_dump(mode="json")
 
 
 @app.post("/projects/{project_id}/generate-all-queued")
-def generate_all_queued(project_id: str) -> dict:
-    _get_project_or_404(project_id)
+def generate_all_queued(project_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     return job_runner.start(project_id, JobType.generate_all).model_dump(mode="json")
 
 
 @app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
-    return _job_or_404(job_id)
+def get_job(job_id: str, request: Request) -> dict:
+    return _job_or_404(job_id, request)
 
 
 @app.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str) -> dict:
+def cancel_job(job_id: str, request: Request) -> dict:
+    _get_job_or_404(job_id, request)
     try:
         return job_runner.cancel(job_id).model_dump(mode="json")
     except (InvalidIdentifierError, UnsafePathError):
@@ -531,7 +641,8 @@ def cancel_job(job_id: str) -> dict:
 
 
 @app.post("/jobs/{job_id}/retry")
-def retry_job(job_id: str) -> dict:
+def retry_job(job_id: str, request: Request) -> dict:
+    _get_job_or_404(job_id, request)
     try:
         return job_runner.retry(job_id).model_dump(mode="json")
     except (InvalidIdentifierError, UnsafePathError):
@@ -543,19 +654,19 @@ def retry_job(job_id: str) -> dict:
 
 
 @app.get("/jobs/{job_id}/events")
-def get_job_events(job_id: str) -> list[dict]:
-    return _job_or_404(job_id).get("events", [])
+def get_job_events(job_id: str, request: Request) -> list[dict]:
+    return _job_or_404(job_id, request).get("events", [])
 
 
 @app.get("/projects/{project_id}/jobs")
-def list_project_jobs(project_id: str) -> list[dict]:
-    _get_project_or_404(project_id)
+def list_project_jobs(project_id: str, request: Request) -> list[dict]:
+    _get_project_or_404(project_id, request)
     return [job.model_dump(mode="json") for job in job_store.list_for_project(project_id)]
 
 
 @app.patch("/projects/{project_id}/scenes/{scene_id}")
-def patch_scene(project_id: str, scene_id: str, payload: ScenePatch) -> dict:
-    _get_project_or_404(project_id)
+def patch_scene(project_id: str, scene_id: str, payload: ScenePatch, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     try:
         return _with_file_urls(store.patch_scene(project_id, scene_id, payload))
     except SceneNotFoundError:
@@ -563,8 +674,8 @@ def patch_scene(project_id: str, scene_id: str, payload: ScenePatch) -> dict:
 
 
 @app.post("/projects/{project_id}/scenes")
-def insert_scene(project_id: str, payload: SceneCreate) -> dict:
-    _get_project_or_404(project_id)
+def insert_scene(project_id: str, payload: SceneCreate, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     try:
         return _with_file_urls(store.insert_scene(project_id, payload))
     except SceneNotFoundError:
@@ -572,8 +683,8 @@ def insert_scene(project_id: str, payload: SceneCreate) -> dict:
 
 
 @app.delete("/projects/{project_id}/scenes/{scene_id}")
-def delete_scene(project_id: str, scene_id: str) -> dict:
-    _get_project_or_404(project_id)
+def delete_scene(project_id: str, scene_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     try:
         return _with_file_urls(store.delete_scene(project_id, scene_id))
     except SceneNotFoundError:
@@ -581,8 +692,8 @@ def delete_scene(project_id: str, scene_id: str) -> dict:
 
 
 @app.post("/projects/{project_id}/scenes/reorder")
-def reorder_scenes(project_id: str, payload: SceneReorder) -> dict:
-    _get_project_or_404(project_id)
+def reorder_scenes(project_id: str, payload: SceneReorder, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     try:
         return _with_file_urls(store.reorder_scenes(project_id, payload))
     except InvalidSceneOrderError as exc:
@@ -590,8 +701,8 @@ def reorder_scenes(project_id: str, payload: SceneReorder) -> dict:
 
 
 @app.post("/projects/{project_id}/scenes/{scene_id}/regenerate-slide")
-def regenerate_scene_slide(project_id: str, scene_id: str) -> dict:
-    _get_project_or_404(project_id)
+def regenerate_scene_slide(project_id: str, scene_id: str, request: Request) -> dict:
+    _get_project_or_404(project_id, request)
     try:
         return _sync_pipeline_response(pipeline.regenerate_scene_slide(project_id, scene_id))
     except SceneNotFoundError:
@@ -599,19 +710,23 @@ def regenerate_scene_slide(project_id: str, scene_id: str) -> dict:
 
 
 @app.get("/files/{file_path:path}")
-def get_file(file_path: str) -> FileResponse:
+def get_file(file_path: str, request: Request) -> FileResponse:
     try:
         path = ensure_within_directory(settings.data_dir, settings.data_dir / file_path)
     except (OSError, ValueError):
         raise HTTPException(status_code=404, detail="File not found") from None
     if not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
+    if _auth_enabled():
+        relative = path.relative_to(settings.data_dir)
+        project_id = relative.parts[0] if relative.parts else ""
+        _get_project_or_404(project_id, request)
     return FileResponse(path)
 
 
 @app.get("/projects/{project_id}/status")
-def project_status(project_id: str) -> dict:
-    project = _get_project_or_404(project_id)
+def project_status(project_id: str, request: Request) -> dict:
+    project = _get_project_or_404(project_id, request)
     jobs = job_store.list_for_project(project_id)
     latest_job = jobs[0].model_dump(mode="json") if jobs else None
     return {
@@ -627,11 +742,11 @@ def project_status(project_id: str) -> dict:
 
 
 @app.get("/projects/{project_id}/manifest")
-def project_manifest(project_id: str) -> dict:
-    return _project_manifest(_get_project_or_404(project_id))
+def project_manifest(project_id: str, request: Request) -> dict:
+    return _project_manifest(_get_project_or_404(project_id, request))
 
 
 @app.get("/projects/{project_id}/result")
-def project_result(project_id: str) -> dict:
-    project = _get_project_or_404(project_id)
+def project_result(project_id: str, request: Request) -> dict:
+    project = _get_project_or_404(project_id, request)
     return _with_file_urls(project)["result"]

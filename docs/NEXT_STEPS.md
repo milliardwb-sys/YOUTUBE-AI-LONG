@@ -86,7 +86,7 @@
 - PostgreSQL вместо JSON-файлов.
 - S3/R2 storage.
 - Signed URLs.
-- Авторизация.
+- Авторизация: MVP foundation уже есть через `ENABLE_USER_AUTH`, bearer sessions, `owner_id` у projects/jobs и file access checks. Production-доработки: OIDC/managed auth, organizations, roles, audit logs, session revocation UI.
 - Тарифы и лимиты.
 - Admin panel.
 - Observability: logs, traces, job retries.

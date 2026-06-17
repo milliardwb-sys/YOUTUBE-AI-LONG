@@ -50,9 +50,16 @@ class JobStore:
         validate_job_id(job_id)
         return self.jobs_dir / f"{job_id}.json"
 
-    def create(self, project_id: str, job_type: JobType) -> ProjectJob:
+    def create(
+        self,
+        project_id: str,
+        job_type: JobType,
+        *,
+        owner_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> ProjectJob:
         validate_project_id(project_id)
-        job = ProjectJob(project_id=project_id, type=job_type)
+        job = ProjectJob(project_id=project_id, type=job_type, owner_id=owner_id, organization_id=organization_id)
         job.add_event("queued", f"queued_{job_type.value}", 0)
         self.save(job)
         return job
@@ -149,8 +156,13 @@ class JobRunner:
             if active is not None:
                 return active
 
-            job = self.job_store.create(project_id, job_type)
             project = self.pipeline.store.get(project_id)
+            job = self.job_store.create(
+                project_id,
+                job_type,
+                owner_id=project.owner_id,
+                organization_id=project.organization_id,
+            )
             project.status = ProjectStatus.queued
             project.touch(f"queued_{job_type.value}")
             self.pipeline.store.save(project)

@@ -47,7 +47,13 @@ class ProjectStore:
     def project_file(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "project.json"
 
-    def create_project(self, payload: ProjectCreate) -> Project:
+    def create_project(
+        self,
+        payload: ProjectCreate,
+        *,
+        owner_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> Project:
         data = payload.model_dump()
         explicit_fields = payload.model_fields_set
 
@@ -66,7 +72,7 @@ class ProjectStore:
         if "burn_subtitles" not in explicit_fields:
             data["burn_subtitles"] = self.settings.burn_subtitles_by_default
 
-        project = Project(**data)
+        project = Project(**data, owner_id=owner_id, organization_id=organization_id)
         ensure_dir(self.project_dir(project.id))
         self.save(project)
         return project
@@ -231,10 +237,13 @@ class ProjectStore:
             raise ProjectNotFoundError(project_id)
         return Project.model_validate(read_json(path))
 
-    def list_projects(self) -> list[Project]:
+    def list_projects(self, *, owner_id: str | None = None) -> list[Project]:
         projects: list[Project] = []
         for project_file in sorted(self.settings.data_dir.glob("project_*/project.json")):
-            projects.append(Project.model_validate(read_json(project_file)))
+            project = Project.model_validate(read_json(project_file))
+            if owner_id is not None and project.owner_id != owner_id:
+                continue
+            projects.append(project)
         return projects
 
     def cleanup_old_projects(self, retention_days: int | None = None) -> dict[str, int]:
