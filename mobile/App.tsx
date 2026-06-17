@@ -5,7 +5,9 @@ import {
   cancelJob,
   createProject,
   delay,
+  deleteProject,
   deleteScene,
+  duplicateProject,
   getJob,
   getProject,
   getProjectManifest,
@@ -16,6 +18,7 @@ import {
   patchScene,
   registerUser,
   regenerateSceneSlide,
+  reorderScenes,
   retryJob,
   setAccessToken,
   startProjectJob,
@@ -133,6 +136,42 @@ export default function App() {
       selectScene(selected.scenes?.[0] ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Open project failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDuplicateProject() {
+    if (!project) return;
+    setLoading(true);
+    setError(null);
+    setJob(null);
+    try {
+      const copy = await duplicateProject(project.id);
+      setProject(copy);
+      setManifest(await getProjectManifest(copy.id));
+      selectScene(copy.scenes?.[0] ?? null);
+      await refreshProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Duplicate project failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!project) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await deleteProject(project.id);
+      setProject(null);
+      setJob(null);
+      setManifest(null);
+      selectScene(null);
+      await refreshProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete project failed');
     } finally {
       setLoading(false);
     }
@@ -269,10 +308,34 @@ export default function App() {
     }
   }
 
+  async function handleMoveScene(direction: -1 | 1) {
+    if (!project || !selectedSceneId) return;
+    const currentIndex = project.scenes.findIndex((scene) => scene.id === selectedSceneId);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= project.scenes.length) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const sceneIds = project.scenes.map((scene) => scene.id);
+      const [moved] = sceneIds.splice(currentIndex, 1);
+      sceneIds.splice(targetIndex, 0, moved);
+      const updated = await reorderScenes(project.id, sceneIds);
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Move scene failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const progress = job?.progress ?? (loading ? 2 : 0);
   const canCancel = job?.status === 'queued' || job?.status === 'running';
   const canRetry = job?.status === 'failed' || job?.status === 'cancelled';
   const selectedScene = project?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null;
+  const selectedSceneIndex = project?.scenes?.findIndex((scene) => scene.id === selectedSceneId) ?? -1;
+  const canMoveSceneUp = selectedSceneIndex > 0;
+  const canMoveSceneDown = Boolean(project?.scenes && selectedSceneIndex >= 0 && selectedSceneIndex < project.scenes.length - 1);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -400,6 +463,10 @@ export default function App() {
             <Text>Project ID: {project.id}</Text>
             <Text>Status: {project.status}</Text>
             <Text>Step: {project.current_step}</Text>
+            <View style={styles.buttonRow}>
+              <Button title="Duplicate" onPress={handleDuplicateProject} disabled={loading} />
+              <Button title="Delete" onPress={handleDeleteProject} disabled={loading} />
+            </View>
             {job ? <Text>Job: {job.status} · {job.progress}% · {job.current_step}</Text> : null}
             {job?.events?.slice(-5).map((event, index) => (
               <Text key={`${event.created_at}-${index}`} style={styles.event}>
@@ -451,6 +518,10 @@ export default function App() {
               <View style={styles.buttonRow}>
                 <Button title="Delete" onPress={handleDeleteScene} disabled={loading || !selectedScene} />
                 <Button title="Regen slide" onPress={handleRegenerateSceneSlide} disabled={loading || !selectedScene} />
+              </View>
+              <View style={styles.buttonRow}>
+                <Button title="Move up" onPress={() => handleMoveScene(-1)} disabled={loading || !canMoveSceneUp} />
+                <Button title="Move down" onPress={() => handleMoveScene(1)} disabled={loading || !canMoveSceneDown} />
               </View>
             </View>
             {manifest ? (

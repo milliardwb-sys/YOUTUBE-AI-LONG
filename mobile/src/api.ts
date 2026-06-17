@@ -210,10 +210,25 @@ export async function regenerateSceneSlide(projectId: string, sceneId: string): 
   return response.json();
 }
 
+export async function reorderScenes(projectId: string, sceneIds: string[]): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/scenes/reorder`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ scene_ids: sceneIds }),
+  });
+  await assertOk(response, 'Reorder scenes');
+  return response.json();
+}
+
 export async function duplicateProject(projectId: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/duplicate`, { method: 'POST', headers: headers() });
   await assertOk(response, 'Duplicate project');
   return response.json();
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}`, { method: 'DELETE', headers: headers() });
+  await assertOk(response, 'Delete project');
 }
 
 export function delay(ms: number) {

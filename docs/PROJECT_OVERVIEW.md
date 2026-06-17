@@ -91,7 +91,8 @@ Mobile-клиент — минимальный Expo-интерфейс:
 - ввод темы;
 - login/register account block for `ENABLE_USER_AUTH=true`;
 - user-scoped project list and open-project flow;
-- scene editor for title/narration/duration, insert/delete, and one-slide regeneration;
+- project duplicate/delete controls;
+- scene editor for title/narration/duration, insert/delete/reorder, and one-slide regeneration;
 - переключатели official sources, LLM script, TTS voice, burned subtitles;
 - создание проекта;
 - запуск `generate_all` как backend job;
