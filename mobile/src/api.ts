@@ -1,4 +1,4 @@
-import type { AuthToken, JobEvent, JobType, Project, ProjectJob, ProjectManifest, UserPublic } from './types';
+import type { AuthToken, JobEvent, JobType, Project, ProjectJob, ProjectManifest, SceneCreate, ScenePatch, UserPublic } from './types';
 
 declare const process: {
   env?: Record<string, string | undefined>;
@@ -169,6 +169,44 @@ export async function getProject(projectId: string): Promise<Project> {
 export async function getProjectManifest(projectId: string): Promise<ProjectManifest> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/manifest`, { headers: headers() });
   await assertOk(response, 'Get project manifest');
+  return response.json();
+}
+
+export async function patchScene(projectId: string, sceneId: string, payload: ScenePatch): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/scenes/${sceneId}`, {
+    method: 'PATCH',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  await assertOk(response, 'Patch scene');
+  return response.json();
+}
+
+export async function insertScene(projectId: string, payload: SceneCreate): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/scenes`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ visual_type: 'ai_slide', ...payload }),
+  });
+  await assertOk(response, 'Insert scene');
+  return response.json();
+}
+
+export async function deleteScene(projectId: string, sceneId: string): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/scenes/${sceneId}`, {
+    method: 'DELETE',
+    headers: headers(),
+  });
+  await assertOk(response, 'Delete scene');
+  return response.json();
+}
+
+export async function regenerateSceneSlide(projectId: string, sceneId: string): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/scenes/${sceneId}/regenerate-slide`, {
+    method: 'POST',
+    headers: headers(),
+  });
+  await assertOk(response, 'Regenerate scene slide');
   return response.json();
 }
 

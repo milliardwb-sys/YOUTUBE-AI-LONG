@@ -107,6 +107,20 @@ export type Scene = {
   audio_url?: string | null;
 };
 
+export type ScenePatch = {
+  title?: string;
+  narration?: string;
+  duration_sec?: number;
+  on_screen_text?: string;
+};
+
+export type SceneCreate = {
+  title: string;
+  narration: string;
+  duration_sec: number;
+  visual_type?: Scene['visual_type'];
+};
+
 export type Project = {
   id: string;
   owner_id?: string | null;

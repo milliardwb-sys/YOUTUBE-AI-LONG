@@ -5,18 +5,22 @@ import {
   cancelJob,
   createProject,
   delay,
+  deleteScene,
   getJob,
   getProject,
   getProjectManifest,
+  insertScene,
   listProjects,
   loginUser,
   logoutUser,
+  patchScene,
   registerUser,
+  regenerateSceneSlide,
   retryJob,
   setAccessToken,
   startProjectJob,
 } from './src/api';
-import type { Project, ProjectJob, ProjectManifest, UserPublic } from './src/types';
+import type { Project, ProjectJob, ProjectManifest, Scene, UserPublic } from './src/types';
 
 export default function App() {
   const [topic, setTopic] = useState('5 AI-сервисов для создания видео в 2026 году');
@@ -35,6 +39,10 @@ export default function App() {
   const [authUser, setAuthUser] = useState<UserPublic | null>(null);
   const [authEmail, setAuthEmail] = useState('owner@example.com');
   const [authPassword, setAuthPassword] = useState('strong-password');
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [sceneTitle, setSceneTitle] = useState('');
+  const [sceneNarration, setSceneNarration] = useState('');
+  const [sceneDuration, setSceneDuration] = useState('12');
 
   async function handleGenerate() {
     setLoading(true);
@@ -107,6 +115,13 @@ export default function App() {
     }
   }
 
+  function selectScene(scene: Scene | null) {
+    setSelectedSceneId(scene?.id ?? null);
+    setSceneTitle(scene?.title ?? '');
+    setSceneNarration(scene?.narration ?? '');
+    setSceneDuration(String(scene?.duration_sec ?? 12));
+  }
+
   async function handleOpenProject(projectId: string) {
     setLoading(true);
     setError(null);
@@ -115,6 +130,7 @@ export default function App() {
       const selected = await getProject(projectId);
       setProject(selected);
       setManifest(await getProjectManifest(projectId));
+      selectScene(selected.scenes?.[0] ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Open project failed');
     } finally {
@@ -134,6 +150,7 @@ export default function App() {
     const finalProject = await getProject(projectId);
     setProject(finalProject);
     setManifest(await getProjectManifest(projectId));
+    selectScene(finalProject.scenes?.[0] ?? null);
     await refreshProjects();
     if (currentJob.status === 'failed') {
       setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
@@ -176,9 +193,86 @@ export default function App() {
     }
   }
 
+  async function refreshActiveProject(updated: Project) {
+    setProject(updated);
+    setManifest(await getProjectManifest(updated.id));
+    await refreshProjects();
+  }
+
+  async function handleSaveScene() {
+    if (!project || !selectedSceneId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const duration = Math.max(5, Math.min(240, Number.parseInt(sceneDuration, 10) || 12));
+      const updated = await patchScene(project.id, selectedSceneId, {
+        title: sceneTitle.trim(),
+        on_screen_text: sceneTitle.trim(),
+        narration: sceneNarration.trim(),
+        duration_sec: duration,
+      });
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save scene failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAddScene() {
+    if (!project) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await insertScene(project.id, {
+        title: sceneTitle.trim() || 'Manual scene',
+        narration: sceneNarration.trim() || 'Manual narration for the new scene.',
+        duration_sec: Math.max(5, Math.min(240, Number.parseInt(sceneDuration, 10) || 12)),
+      });
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes[updated.scenes.length - 1] ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Add scene failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteScene() {
+    if (!project || !selectedSceneId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await deleteScene(project.id, selectedSceneId);
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes[0] ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete scene failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRegenerateSceneSlide() {
+    if (!project || !selectedSceneId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await regenerateSceneSlide(project.id, selectedSceneId);
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Regenerate slide failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const progress = job?.progress ?? (loading ? 2 : 0);
   const canCancel = job?.status === 'queued' || job?.status === 'running';
   const canRetry = job?.status === 'failed' || job?.status === 'cancelled';
+  const selectedScene = project?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -316,6 +410,49 @@ export default function App() {
             <Text>Voice: {project.voice_provider ?? '—'}</Text>
             <Text>Scenes: {project.scenes?.length ?? 0}</Text>
             <Text>Sources: {project.sources?.length ?? 0}</Text>
+            <View style={styles.sceneEditorPanel}>
+              <Text style={styles.cardTitle}>Scene editor</Text>
+              {project.scenes?.length ? (
+                project.scenes.slice(0, 8).map((scene) => (
+                  <View key={scene.id} style={styles.scenePickerRow}>
+                    <Text style={styles.scenePickerText}>
+                      #{scene.order} {scene.title}
+                    </Text>
+                    <Button title={scene.id === selectedSceneId ? 'Selected' : 'Edit'} onPress={() => selectScene(scene)} />
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.event}>No scenes yet</Text>
+              )}
+              <TextInput
+                value={sceneTitle}
+                onChangeText={setSceneTitle}
+                style={styles.compactInput}
+                placeholder="scene title"
+              />
+              <TextInput
+                value={sceneNarration}
+                onChangeText={setSceneNarration}
+                multiline
+                style={[styles.compactInput, styles.sceneNarrationInput]}
+                placeholder="scene narration"
+              />
+              <TextInput
+                value={sceneDuration}
+                onChangeText={setSceneDuration}
+                style={styles.compactInput}
+                placeholder="duration seconds"
+                keyboardType="numeric"
+              />
+              <View style={styles.buttonRow}>
+                <Button title="Save" onPress={handleSaveScene} disabled={loading || !selectedScene || sceneTitle.trim().length < 1} />
+                <Button title="Add" onPress={handleAddScene} disabled={loading || sceneTitle.trim().length < 1} />
+              </View>
+              <View style={styles.buttonRow}>
+                <Button title="Delete" onPress={handleDeleteScene} disabled={loading || !selectedScene} />
+                <Button title="Regen slide" onPress={handleRegenerateSceneSlide} disabled={loading || !selectedScene} />
+              </View>
+            </View>
             {manifest ? (
               <View style={styles.manifestBox}>
                 <Text style={styles.manifestTitle}>Manifest: {manifest.readiness.publish_ready ? 'publish ready' : 'not ready'}</Text>
@@ -435,6 +572,10 @@ const styles = StyleSheet.create({
   event: { color: '#475569', marginTop: 3, fontSize: 12 },
   manifestBox: { backgroundColor: '#f8fafc', borderRadius: 10, padding: 12, gap: 4, marginTop: 6 },
   manifestTitle: { color: '#111827', fontWeight: '800' },
+  sceneEditorPanel: { borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 12, gap: 8, marginTop: 8 },
+  scenePickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  scenePickerText: { color: '#334155', flex: 1 },
+  sceneNarrationInput: { minHeight: 90, textAlignVertical: 'top' },
   card: { backgroundColor: 'white', padding: 18, borderRadius: 18, gap: 8, marginTop: 18 },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
   link: { color: '#2457c5' },
