@@ -16,6 +16,7 @@ Remediation update 2026-06-17:
 - `pip-audit` was added to CI for backend runtime dependencies.
 - Current backend runtime audit result: `No known vulnerabilities found`.
 - Production API key placeholder/length validation, FFmpeg render timeout, and safer export packaging were added after this audit.
+- `MAX_REQUEST_BODY_BYTES` and a tracked-file secret scanner were added as additional hardening controls.
 
 The project is a working technical MVP, not a production multi-user SaaS platform yet.
 

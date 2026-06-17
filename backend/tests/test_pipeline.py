@@ -54,6 +54,7 @@ def make_settings(tmp_path: Path) -> Settings:
         allow_private_source_urls=False,
         cleanup_retention_days=14,
         render_timeout_seconds=1800,
+        max_request_body_bytes=2_000_000,
     )
 
 
@@ -447,6 +448,21 @@ def test_api_rate_limit_returns_429(tmp_path, monkeypatch):
     assert first.headers["x-ratelimit-limit"] == "2"
     assert second.status_code == 200
     assert third.status_code == 429
+
+
+def test_api_rejects_large_request_body(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "32")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    response = client.post("/projects", json={"topic": "x" * 240})
+
+    assert response.status_code == 413
+    assert response.headers["x-request-id"]
 
 
 def test_production_requires_api_key_for_private_routes(tmp_path, monkeypatch):

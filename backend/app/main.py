@@ -79,6 +79,10 @@ app.add_middleware(
 async def api_key_middleware(request: Request, call_next):
     started = time.perf_counter()
     request_id = request.headers.get("x-request-id") or f"req_{uuid4().hex[:12]}"
+    if _request_body_is_too_large(request):
+        response = JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        response.headers["x-request-id"] = request_id
+        return response
     public_paths = {"/health", "/ready", "/providers", "/openapi.json"}
     is_docs_path = request.url.path in {"/docs", "/redoc"} or request.url.path.startswith("/docs/")
     is_public_path = request.url.path in public_paths or is_docs_path
@@ -126,6 +130,19 @@ def _rate_limit_key(request: Request) -> str:
     if request.client and request.client.host:
         return f"ip:{request.client.host}"
     return "ip:unknown"
+
+
+def _request_body_is_too_large(request: Request) -> bool:
+    limit = settings.max_request_body_bytes
+    if limit <= 0:
+        return False
+    content_length = request.headers.get("content-length")
+    if not content_length:
+        return False
+    try:
+        return int(content_length) > limit
+    except ValueError:
+        return False
 
 
 def _check_rate_limit(request: Request) -> dict[str, str] | None:
@@ -290,6 +307,7 @@ def health() -> dict[str, str | bool | int]:
         "auth_required": bool(settings.api_key),
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
         "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
+        "max_request_body_bytes": settings.max_request_body_bytes,
     }
 
 
@@ -324,6 +342,7 @@ def diagnostics() -> dict:
         "auth_required": bool(settings.api_key),
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
         "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
+        "max_request_body_bytes": settings.max_request_body_bytes,
         "cors_origins": settings.cors_origins,
         "browser_screenshots": {
             "enabled": settings.enable_browser_screenshots,

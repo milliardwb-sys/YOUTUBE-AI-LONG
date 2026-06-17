@@ -113,6 +113,8 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 
 `APP_ENV=production` без `API_KEY` заблокирует приватные endpoints. Если `API_KEY` задан, backend отклонит известные placeholder-значения и секреты короче 32 символов. `RENDER_TIMEOUT_SECONDS` ограничивает длительность FFmpeg-render, чтобы зависший render не занимал worker бесконечно. Данные проектов сохраняются в Docker volume `backend-projects`.
 
+`MAX_REQUEST_BODY_BYTES` ограничивает размер входящего HTTP body по `Content-Length`. Превышение лимита возвращает `413`.
+
 ## Demo без HTTP
 
 Синхронный pipeline:

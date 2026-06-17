@@ -218,5 +218,7 @@ The mobile MVP reads this manifest after a job finishes and shows whether the ge
 - Runtime and dev backend dependencies are split into `requirements.txt` and `requirements-dev.txt`.
 - CI runs `pip-audit` against backend runtime dependencies.
 - Non-local `API_KEY` values are rejected when they are known placeholders or shorter than 32 characters.
+- `MAX_REQUEST_BODY_BYTES` rejects oversized API payloads with `413`.
 - FFmpeg render is guarded by `RENDER_TIMEOUT_SECONDS`.
 - Export ZIP packaging skips files outside the project directory.
+- CI includes a tracked-file secret scanner.

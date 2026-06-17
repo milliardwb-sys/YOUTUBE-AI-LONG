@@ -45,6 +45,7 @@ class Settings:
     allow_private_source_urls: bool
     cleanup_retention_days: int
     render_timeout_seconds: int
+    max_request_body_bytes: int
 
 
 class ConfigurationError(RuntimeError):
@@ -126,6 +127,7 @@ def get_settings() -> Settings:
         allow_private_source_urls=_env_bool("ALLOW_PRIVATE_SOURCE_URLS", False),
         cleanup_retention_days=_env_int("CLEANUP_RETENTION_DAYS", 14),
         render_timeout_seconds=max(1, _env_int("RENDER_TIMEOUT_SECONDS", 1800)),
+        max_request_body_bytes=max(0, _env_int("MAX_REQUEST_BODY_BYTES", 2_000_000)),
     )
     validate_settings(settings)
     return settings

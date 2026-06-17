@@ -33,6 +33,14 @@ Retry-After
 
 Для полноценного production лучше дополнительно использовать внешний API Gateway / reverse proxy limiter.
 
+## Request size limit
+
+`MAX_REQUEST_BODY_BYTES` limits incoming request body size by `Content-Length`. Requests over the limit return `413`.
+
+```text
+MAX_REQUEST_BODY_BYTES=2000000
+```
+
 ## Error contract
 
 Синхронные pipeline endpoints возвращают HTTP-ошибку, если шаг не выполнен: `400` для compliance, `404` для not found, `409` для precondition failure и `500` для runtime/render/provider failure. Job endpoints отдают ошибки через `GET /jobs/{job_id}`.
@@ -52,7 +60,8 @@ Retry-After
   "openai_configured": false,
   "run_jobs_inline": false,
   "job_workers": 2,
-  "render_timeout_seconds": 1800
+  "render_timeout_seconds": 1800,
+  "max_request_body_bytes": 2000000
 }
 ```
 
