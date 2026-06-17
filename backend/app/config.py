@@ -4,6 +4,17 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+LOCAL_ENVS = {"local", "test", "dev", "development"}
+WEAK_PRODUCTION_API_KEYS = {
+    "CHANGE_ME",
+    "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
+    "changeme",
+    "secret",
+    "password",
+    "test",
+}
+MIN_PRODUCTION_API_KEY_LENGTH = 32
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -33,6 +44,11 @@ class Settings:
     allow_unsafe_http_sources: bool
     allow_private_source_urls: bool
     cleanup_retention_days: int
+    render_timeout_seconds: int
+
+
+class ConfigurationError(RuntimeError):
+    pass
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -82,7 +98,7 @@ def get_settings() -> Settings:
     data_dir = Path(os.getenv("DATA_DIR", "./data/projects")).resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    return Settings(
+    settings = Settings(
         app_env=os.getenv("APP_ENV", "local"),
         data_dir=data_dir,
         public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000"),
@@ -109,4 +125,18 @@ def get_settings() -> Settings:
         allow_unsafe_http_sources=_env_bool("ALLOW_UNSAFE_HTTP_SOURCES", False),
         allow_private_source_urls=_env_bool("ALLOW_PRIVATE_SOURCE_URLS", False),
         cleanup_retention_days=_env_int("CLEANUP_RETENTION_DAYS", 14),
+        render_timeout_seconds=max(1, _env_int("RENDER_TIMEOUT_SECONDS", 1800)),
     )
+    validate_settings(settings)
+    return settings
+
+
+def validate_settings(settings: Settings) -> None:
+    if settings.app_env in LOCAL_ENVS or not settings.api_key:
+        return
+    if settings.api_key in WEAK_PRODUCTION_API_KEYS:
+        raise ConfigurationError("API_KEY uses a known placeholder value")
+    if len(settings.api_key) < MIN_PRODUCTION_API_KEY_LENGTH:
+        raise ConfigurationError(
+            f"API_KEY must be at least {MIN_PRODUCTION_API_KEY_LENGTH} characters in non-local environments"
+        )

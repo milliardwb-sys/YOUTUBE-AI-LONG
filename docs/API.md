@@ -12,6 +12,8 @@ http://localhost:8000
 
 Если `APP_ENV` не `local`, `test`, `dev` или `development`, backend требует настроенный `API_KEY` для приватных endpoints. Без ключа приватные routes возвращают `403`, чтобы production-сервер нельзя было случайно запустить открытым.
 
+Если `API_KEY` задан в non-local окружении, backend отклоняет известные placeholder-значения и секреты короче 32 символов.
+
 ## Rate limiting
 
 Встроенный in-memory limiter включается через:
@@ -35,6 +37,8 @@ Retry-After
 
 Синхронные pipeline endpoints возвращают HTTP-ошибку, если шаг не выполнен: `400` для compliance, `404` для not found, `409` для precondition failure и `500` для runtime/render/provider failure. Job endpoints отдают ошибки через `GET /jobs/{job_id}`.
 
+`RENDER_TIMEOUT_SECONDS` ограничивает длительность FFmpeg-render. При timeout проект/job завершается ошибкой вместо бесконечного удержания worker.
+
 ## GET /health
 
 Проверяет, что backend работает.
@@ -47,7 +51,8 @@ Retry-After
   "browser_screenshots": false,
   "openai_configured": false,
   "run_jobs_inline": false,
-  "job_workers": 2
+  "job_workers": 2,
+  "render_timeout_seconds": 1800
 }
 ```
 

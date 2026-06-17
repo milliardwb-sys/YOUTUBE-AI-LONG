@@ -12,6 +12,7 @@ from app.config import Settings
 from app.errors import PipelinePreconditionError
 from app.models import Project, ProjectStatus
 from app.utils.files import ensure_dir, write_json, write_text
+from app.utils.security import ensure_within_directory
 from app.utils.text import wrap_text
 
 
@@ -54,6 +55,8 @@ class RenderService:
         for scene in project.scenes:
             if not scene.visual_path or not scene.audio_path:
                 raise PipelinePreconditionError(f"Scene {scene.order} has no visual/audio path")
+            self._safe_existing_project_file(project, project_dir, scene.visual_path, f"Scene {scene.order} visual", strict=True)
+            self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio", strict=True)
 
         ffmpeg_bin = self.resolve_ffmpeg_bin()
         if not ffmpeg_bin:
@@ -65,10 +68,14 @@ class RenderService:
             return project
 
         slideshow_file = render_dir / "slides_concat.txt"
-        self._write_slideshow_concat(project, slideshow_file)
+        self._write_slideshow_concat(project, project_dir, slideshow_file)
 
         full_audio = render_dir / "full_audio.wav"
-        self._merge_wav_files([Path(scene.audio_path) for scene in project.scenes], full_audio)
+        audio_paths = [
+            self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio", strict=True)
+            for scene in project.scenes
+        ]
+        self._merge_wav_files(audio_paths, full_audio)
 
         final_video = render_dir / "final.mp4"
         self._render_slideshow(project, slideshow_file, full_audio, final_video, ffmpeg_bin)
@@ -81,13 +88,17 @@ class RenderService:
         project.touch("completed")
         return project
 
-    def _write_slideshow_concat(self, project: Project, concat_file: Path) -> None:
+    def _write_slideshow_concat(self, project: Project, project_dir: Path, concat_file: Path) -> None:
         lines: list[str] = []
         for scene in project.scenes:
-            image_path = Path(scene.visual_path).resolve().as_posix()
+            image_path = self._safe_existing_project_file(
+                project, project_dir, scene.visual_path, f"Scene {scene.order} visual", strict=True
+            ).resolve().as_posix()
             lines.append(f"file '{image_path}'")
             lines.append(f"duration {scene.duration_sec}")
-        last_path = Path(project.scenes[-1].visual_path).resolve().as_posix()
+        last_path = self._safe_existing_project_file(
+            project, project_dir, project.scenes[-1].visual_path, "Last scene visual", strict=True
+        ).resolve().as_posix()
         lines.append(f"file '{last_path}'")
         concat_file.write_text("\n".join(lines), encoding="utf-8")
 
@@ -176,7 +187,12 @@ class RenderService:
         self._run(cmd)
 
     def _run(self, cmd: list[str]) -> None:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.settings.render_timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"FFmpeg command timed out after {self.settings.render_timeout_seconds} seconds"
+            ) from exc
         if result.returncode != 0:
             raise RuntimeError(
                 "FFmpeg command failed:\n"
@@ -234,21 +250,49 @@ class RenderService:
         ]
         with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
             for file_value in files:
-                if not file_value:
-                    continue
-                file_path = Path(file_value)
-                if file_path.exists():
+                file_path = self._safe_existing_project_file(project, project_dir, file_value, "Export artifact")
+                if file_path:
                     archive.write(file_path, arcname=file_path.name)
             for scene in project.scenes:
-                if scene.visual_path and Path(scene.visual_path).exists():
-                    archive.write(Path(scene.visual_path), arcname=f"slides/{Path(scene.visual_path).name}")
+                file_path = self._safe_existing_project_file(project, project_dir, scene.visual_path, f"Scene {scene.order} visual")
+                if file_path:
+                    archive.write(file_path, arcname=f"slides/{file_path.name}")
             for scene in project.scenes:
-                if scene.audio_path and Path(scene.audio_path).exists():
-                    archive.write(Path(scene.audio_path), arcname=f"audio/{Path(scene.audio_path).name}")
+                file_path = self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio")
+                if file_path:
+                    archive.write(file_path, arcname=f"audio/{file_path.name}")
             for source in project.sources:
-                if source.screenshot_path and Path(source.screenshot_path).exists():
-                    archive.write(Path(source.screenshot_path), arcname=f"sources/{Path(source.screenshot_path).name}")
+                file_path = self._safe_existing_project_file(project, project_dir, source.screenshot_path, f"Source {source.id} screenshot")
+                if file_path:
+                    archive.write(file_path, arcname=f"sources/{file_path.name}")
         project.result.export_package_path = str(package_path)
+
+    def _safe_existing_project_file(
+        self,
+        project: Project,
+        project_dir: Path,
+        path_value: str | None,
+        label: str,
+        *,
+        strict: bool = False,
+    ) -> Path | None:
+        if not path_value:
+            return None
+        try:
+            path = ensure_within_directory(project_dir, Path(path_value))
+        except (OSError, ValueError) as exc:
+            message = f"{label} path escapes project directory"
+            if strict:
+                raise RuntimeError(message) from exc
+            warning = f"{message}; skipped from export package."
+            if warning not in project.result.warnings:
+                project.result.warnings.append(warning)
+            return None
+        if not path.is_file():
+            if strict:
+                raise RuntimeError(f"{label} file is missing: {path_value}")
+            return None
+        return path
 
     def _make_description(self, project: Project) -> str:
         chapters: list[str] = []

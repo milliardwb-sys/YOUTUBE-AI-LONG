@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from zipfile import ZipFile
@@ -9,7 +10,7 @@ from zipfile import ZipFile
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings, get_settings
+from app.config import ConfigurationError, Settings, get_settings
 from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, VisualMode, VoiceProviderName
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
@@ -52,6 +53,7 @@ def make_settings(tmp_path: Path) -> Settings:
         allow_unsafe_http_sources=False,
         allow_private_source_urls=False,
         cleanup_retention_days=14,
+        render_timeout_seconds=1800,
     )
 
 
@@ -275,6 +277,42 @@ def test_render_service_resolves_ffmpeg_binary(tmp_path):
     assert resolver.resolve_ffmpeg_bin()
 
 
+def test_render_service_times_out_ffmpeg(tmp_path, monkeypatch):
+    settings = make_settings(tmp_path)
+    settings = Settings(**{**settings.__dict__, "render_timeout_seconds": 1})
+    renderer = RenderService(settings)
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0] if args else "ffmpeg", timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        renderer._run(["ffmpeg", "-version"])
+
+
+def test_render_export_package_skips_paths_outside_project_dir(tmp_path):
+    settings = make_settings(tmp_path / "data")
+    store = ProjectStore(settings)
+    project = store.create_project(ProjectCreate(topic="Тестовый проект для безопасного export package"))
+    project_dir = store.project_dir(project.id)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    inside = project_dir / "exports" / "sources.json"
+    inside.parent.mkdir(parents=True, exist_ok=True)
+    inside.write_text("{}", encoding="utf-8")
+    project.result.description_path = str(outside)
+    project.result.sources_path = str(inside)
+
+    RenderService(settings)._create_export_package(project, project_dir)
+
+    with ZipFile(project.result.export_package_path) as archive:
+        names = archive.namelist()
+    assert "outside.txt" not in names
+    assert "sources.json" in names
+    assert any("path escapes project directory" in warning for warning in project.result.warnings)
+
+
 def test_get_settings_parses_openai_temperature(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("OPENAI_TEMPERATURE", "0.2")
@@ -297,6 +335,15 @@ def test_get_settings_parses_rate_limit(tmp_path, monkeypatch):
     settings = get_settings()
 
     assert settings.rate_limit_requests_per_minute == 12
+
+
+def test_get_settings_rejects_weak_production_api_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("API_KEY", "CHANGE_ME_TO_A_LONG_RANDOM_SECRET")
+
+    with pytest.raises(ConfigurationError):
+        get_settings()
 
 
 def test_api_import_and_delete_smoke(tmp_path, monkeypatch):
@@ -322,7 +369,8 @@ def test_api_import_and_delete_smoke(tmp_path, monkeypatch):
 
 def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("API_KEY", "secret")
+    api_key = "test-secret-value-with-more-than-32-chars"
+    monkeypatch.setenv("API_KEY", api_key)
     monkeypatch.setenv("APP_ENV", "production")
     sys.modules.pop("app.main", None)
     main = importlib.import_module("app.main")
@@ -332,8 +380,8 @@ def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     assert client.get("/ready").status_code == 200
     assert client.get("/projects").status_code == 401
     assert client.get("/diagnostics").status_code == 401
-    assert client.get("/projects", headers={"x-api-key": "secret"}).status_code == 200
-    assert client.get("/diagnostics", headers={"x-api-key": "secret"}).status_code == 200
+    assert client.get("/projects", headers={"x-api-key": api_key}).status_code == 200
+    assert client.get("/diagnostics", headers={"x-api-key": api_key}).status_code == 200
 
 
 def test_api_stats_endpoint(tmp_path, monkeypatch):

@@ -8,6 +8,15 @@ Scope: local repository code, backend API, mobile MVP, Docker/CI/dependency conf
 
 ## 1. Executive Summary
 
+Remediation update 2026-06-17:
+
+- Backend runtime and dev dependencies were split into `requirements.txt` and `requirements-dev.txt`.
+- FastAPI/Starlette/Pydantic/Uvicorn/OpenAI runtime dependencies were updated.
+- `python-multipart` and `pytest` were removed from the production runtime dependency set.
+- `pip-audit` was added to CI for backend runtime dependencies.
+- Current backend runtime audit result: `No known vulnerabilities found`.
+- Production API key placeholder/length validation, FFmpeg render timeout, and safer export packaging were added after this audit.
+
 The project is a working technical MVP, not a production multi-user SaaS platform yet.
 
 It can create a video-generation project, generate a script, collect safe visual sources, generate slides, create placeholder or OpenAI TTS audio, render MP4 through FFmpeg, package YouTube metadata, expose job progress, support cancel/retry, and report project readiness through `/stats` and `/projects/{id}/manifest`.

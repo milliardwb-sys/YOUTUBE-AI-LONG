@@ -212,3 +212,11 @@ curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 `GET /projects/{id}/manifest` adds a compact readiness audit for each project. It reports scene/source counts, visual/audio coverage, expected artifacts, ready artifacts, missing files, per-artifact URLs and sizes, and a final `publish_ready` flag.
 
 The mobile MVP reads this manifest after a job finishes and shows whether the generated project is ready for publishing or still has missing artifacts.
+
+## Hardening Update
+
+- Runtime and dev backend dependencies are split into `requirements.txt` and `requirements-dev.txt`.
+- CI runs `pip-audit` against backend runtime dependencies.
+- Non-local `API_KEY` values are rejected when they are known placeholders or shorter than 32 characters.
+- FFmpeg render is guarded by `RENDER_TIMEOUT_SECONDS`.
+- Export ZIP packaging skips files outside the project directory.

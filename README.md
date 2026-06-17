@@ -79,6 +79,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+For backend tests and dependency audit install dev dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 Проверка:
 
 ```bash
@@ -94,6 +100,7 @@ python -c "import app.main"
 ```bash
 cp backend/.env.production.example backend/.env.production
 # обязательно замените API_KEY на длинный секрет
+# PowerShell secret helper: -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 48 | ForEach-Object {[char]$_})
 docker compose up --build
 ```
 
@@ -104,7 +111,7 @@ curl http://127.0.0.1:8000/ready
 curl -H "X-API-Key: <API_KEY>" http://127.0.0.1:8000/projects
 ```
 
-`APP_ENV=production` без `API_KEY` заблокирует приватные endpoints. Данные проектов сохраняются в Docker volume `backend-projects`.
+`APP_ENV=production` без `API_KEY` заблокирует приватные endpoints. Если `API_KEY` задан, backend отклонит известные placeholder-значения и секреты короче 32 символов. `RENDER_TIMEOUT_SECONDS` ограничивает длительность FFmpeg-render, чтобы зависший render не занимал worker бесконечно. Данные проектов сохраняются в Docker volume `backend-projects`.
 
 ## Demo без HTTP
 

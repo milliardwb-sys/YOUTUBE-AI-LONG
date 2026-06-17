@@ -286,6 +286,7 @@ def health() -> dict[str, str | bool | int]:
         "openai_configured": bool(settings.openai_api_key),
         "run_jobs_inline": settings.run_jobs_inline,
         "job_workers": settings.job_workers,
+        "render_timeout_seconds": settings.render_timeout_seconds,
         "auth_required": bool(settings.api_key),
         "auth_configured_for_env": bool(settings.api_key) or settings.app_env in {"local", "test", "dev", "development"},
         "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
@@ -338,6 +339,9 @@ def diagnostics() -> dict:
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
             **job_store.stats(),
+        },
+        "render": {
+            "timeout_seconds": settings.render_timeout_seconds,
         },
     }
 
