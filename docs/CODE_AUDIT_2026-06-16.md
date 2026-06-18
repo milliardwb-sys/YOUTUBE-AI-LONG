@@ -20,9 +20,10 @@
 - добавлены pagination headers и Idempotency-Key для критичных POST endpoints;
 - добавлен file-backed audit log для auth/project/job/scene действий с пользовательской изоляцией;
 - добавлен MVP usage/limits/cost tracking слой и secure token persistence в мобильном клиенте через Expo SecureStore;
-- добавлен local backup snapshot и restore-preview flow для file-backed данных.
+- добавлен local backup snapshot и restore-preview flow для file-backed данных;
+- добавлен lightweight in-memory observability metrics endpoint.
 
-Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, Stripe/subscriptions, production observability, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
+Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, Stripe/subscriptions, production-grade observability, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
 
 ## 2. Оценка готовности
 
@@ -41,6 +42,7 @@
 - FastAPI backend: routes, middleware, auth, project/job/file access.
 - Pydantic models: project, scene, source, result, job, auth DTO.
 - Local storage: JSON project store, job store, auth store, idempotency store, audit log store, usage ledger, backup snapshots.
+- Observability: health/ready/diagnostics плюс in-memory request metrics.
 - Pipeline: script, source collection, visual slides, voice, avatar placeholder, render/export.
 - Mobile Expo client: API client, auth flow, project list, project controls, scene editor.
 - Security controls: API key, bearer token, owner checks, path validation, URL validation, rate limit.
@@ -53,7 +55,7 @@
 
 Реализовано:
 
-- `GET /health`, `GET /ready`, `GET /diagnostics`, `GET /providers`.
+- `GET /health`, `GET /ready`, `GET /diagnostics`, `GET /providers`, `GET /observability/metrics`.
 - `POST /auth/register`, `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`.
 - `POST /projects`, `GET /projects`, `GET /projects/{id}`, `PATCH /projects/{id}`, `DELETE /projects/{id}`.
 - `POST /projects/{id}/duplicate`.
@@ -171,6 +173,27 @@
 - нет remote backup storage;
 - нет расписания backup и retention policy для backup snapshots;
 - нет production restore approval workflow.
+
+### Observability
+
+Реализовано:
+
+- structured request logging через backend logger;
+- `GET /health`;
+- `GET /ready`;
+- `GET /diagnostics`;
+- `GET /observability/metrics`;
+- in-memory counters по status code и path;
+- average/max request latency;
+- uptime seconds.
+
+Ограничения:
+
+- metrics не durable и сбрасываются при restart;
+- нет Prometheus/OpenTelemetry exporter;
+- нет централизованных logs/traces;
+- нет dashboards и alerting;
+- нет incident response automation.
 
 ### Генерация видео
 
@@ -313,7 +336,7 @@
 4. Нет RBAC/organizations/roles.
 5. Нет Stripe billing/subscriptions; usage limits есть только как MVP foundation.
 6. Audit log есть только file-backed MVP, без immutable storage/admin-wide browser.
-7. Нет observability и alerting.
+7. Observability есть только как MVP health/diagnostics/in-memory metrics; нет production alerting/tracing.
 8. Backup/restore есть только как MVP local snapshot/restore-preview.
 9. Нет legal consent для voice/avatar.
 10. Нет managed mobile session/device controls поверх SecureStore.

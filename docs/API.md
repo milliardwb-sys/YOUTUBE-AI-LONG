@@ -128,6 +128,16 @@ POST /maintenance/backups/{backup_id}/restore-preview
 
 Restore is intentionally a preview operation in the MVP: `restore-preview` extracts the backup into `DATA_DIR/_restores/<restore_id>` and does not overwrite live project/job/auth data. This gives a safe restore drill before a future production restore flow with explicit operator approval.
 
+## Observability metrics
+
+Backend exposes lightweight in-memory request metrics:
+
+```text
+GET /observability/metrics
+```
+
+The response includes uptime, total requests, average/max latency, requests by status code, and top request paths. This is an MVP observability layer; production should still add centralized logs, traces, metrics storage, dashboards and alerts.
+
 ## Rate limiting
 
 Встроенный in-memory limiter включается через:

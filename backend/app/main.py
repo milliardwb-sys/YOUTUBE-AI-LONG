@@ -75,8 +75,17 @@ idempotency_store = IdempotencyStore(settings)
 audit_log = AuditLogService(settings)
 usage_service = UsageService(settings)
 backup_service = BackupService(settings)
+app_started_at = time.time()
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
+metrics_lock = Lock()
+request_metrics: dict[str, object] = {
+    "total_requests": 0,
+    "total_elapsed_ms": 0,
+    "max_elapsed_ms": 0,
+    "by_status": {},
+    "by_path": {},
+}
 
 app = FastAPI(
     title="AI Video Studio MVP API",
@@ -160,6 +169,7 @@ async def api_key_middleware(request: Request, call_next):
     for header, value in rate_limit_headers.items():
         response.headers[header] = value
     elapsed_ms = int((time.perf_counter() - started) * 1000)
+    _record_request_metric(request.method, request.url.path, response.status_code, elapsed_ms)
     response.headers["x-request-id"] = request_id
     logger.info(
         "request",
@@ -172,6 +182,37 @@ async def api_key_middleware(request: Request, call_next):
         },
     )
     return response
+
+
+def _record_request_metric(method: str, path: str, status_code: int, elapsed_ms: int) -> None:
+    status_key = str(status_code)
+    path_key = f"{method.upper()} {path}"
+    with metrics_lock:
+        request_metrics["total_requests"] = int(request_metrics["total_requests"]) + 1
+        request_metrics["total_elapsed_ms"] = int(request_metrics["total_elapsed_ms"]) + elapsed_ms
+        request_metrics["max_elapsed_ms"] = max(int(request_metrics["max_elapsed_ms"]), elapsed_ms)
+        by_status = request_metrics["by_status"]
+        by_path = request_metrics["by_path"]
+        if isinstance(by_status, dict):
+            by_status[status_key] = int(by_status.get(status_key, 0)) + 1
+        if isinstance(by_path, dict):
+            by_path[path_key] = int(by_path.get(path_key, 0)) + 1
+
+
+def _metrics_snapshot() -> dict:
+    with metrics_lock:
+        total = int(request_metrics["total_requests"])
+        total_elapsed = int(request_metrics["total_elapsed_ms"])
+        by_status = dict(request_metrics["by_status"]) if isinstance(request_metrics["by_status"], dict) else {}
+        by_path = dict(request_metrics["by_path"]) if isinstance(request_metrics["by_path"], dict) else {}
+        return {
+            "uptime_seconds": int(time.time() - app_started_at),
+            "total_requests": total,
+            "average_elapsed_ms": round(total_elapsed / total, 2) if total else 0,
+            "max_elapsed_ms": int(request_metrics["max_elapsed_ms"]),
+            "by_status": by_status,
+            "by_path": dict(sorted(by_path.items(), key=lambda item: item[1], reverse=True)[:50]),
+        }
 
 
 def _error_response(
@@ -717,6 +758,15 @@ def diagnostics() -> dict:
         "render": {
             "timeout_seconds": settings.render_timeout_seconds,
         },
+    }
+
+
+@app.get("/observability/metrics")
+def observability_metrics() -> dict:
+    return {
+        "status": "ok",
+        "version": "0.4.0",
+        "metrics": _metrics_snapshot(),
     }
 
 

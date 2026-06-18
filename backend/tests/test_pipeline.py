@@ -774,6 +774,24 @@ def test_api_stats_endpoint(tmp_path, monkeypatch):
     assert payload["jobs"]["job_count"] == 0
 
 
+def test_observability_metrics_collects_requests(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    assert client.get("/health").status_code == 200
+    response = client.get("/observability/metrics")
+
+    assert response.status_code == 200
+    metrics = response.json()["metrics"]
+    assert metrics["total_requests"] >= 1
+    assert metrics["by_status"]["200"] >= 1
+    assert metrics["by_path"]["GET /health"] >= 1
+
+
 def test_api_project_manifest_reports_readiness_and_missing_artifacts(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")
