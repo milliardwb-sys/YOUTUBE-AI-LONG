@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.config import get_settings
 from app.models import (
+    JobStatus,
     JobType,
     PlatformUser,
     Project,
@@ -45,6 +46,7 @@ from app.services.idempotency_service import (
 )
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
+from app.services.usage_service import UsageService
 from app.services.source_service import SourceService
 from app.services.visual_service import VisualService
 from app.services.voice_service import VoiceService
@@ -70,6 +72,7 @@ job_runner = JobRunner(settings, pipeline, job_store)
 auth_service = AuthService(settings)
 idempotency_store = IdempotencyStore(settings)
 audit_log = AuditLogService(settings)
+usage_service = UsageService(settings)
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
 
@@ -329,6 +332,14 @@ def _set_pagination_headers(response: Response, *, total: int, limit: int, offse
     response.headers["x-offset"] = str(offset)
 
 
+def _actor_id(user: PlatformUser | None) -> str | None:
+    return user.id if user else None
+
+
+def _project_owner_scope(user: PlatformUser | None) -> str | None:
+    return user.id if user else None
+
+
 def _request_id(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
@@ -350,6 +361,85 @@ def _audit(
         request_id=_request_id(request),
         metadata=metadata,
     )
+
+
+def _active_job_count_for_user(user: PlatformUser | None) -> int:
+    actor_id = _actor_id(user)
+    count = 0
+    for job in job_store.list_all():
+        if job.status not in {JobStatus.queued, JobStatus.running}:
+            continue
+        if actor_id is not None and job.owner_id != actor_id:
+            continue
+        if actor_id is None and _auth_enabled():
+            continue
+        count += 1
+    return count
+
+
+def _project_count_for_user(user: PlatformUser | None) -> int:
+    return len(store.list_projects(owner_id=_project_owner_scope(user)))
+
+
+def _usage_limits(user: PlatformUser | None) -> dict[str, int]:
+    return {
+        "max_projects": settings.usage_max_projects_per_user,
+        "max_active_jobs": settings.usage_max_active_jobs_per_user,
+        "current_projects": _project_count_for_user(user),
+        "current_active_jobs": _active_job_count_for_user(user),
+    }
+
+
+def _enforce_project_quota(user: PlatformUser | None) -> None:
+    limit = settings.usage_max_projects_per_user
+    if limit <= 0:
+        return
+    current = _project_count_for_user(user)
+    if current >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "project_quota_exceeded",
+                "limit": limit,
+                "current": current,
+                "message": "Project quota exceeded",
+            },
+        )
+
+
+def _enforce_active_job_quota(user: PlatformUser | None) -> None:
+    limit = settings.usage_max_active_jobs_per_user
+    if limit <= 0:
+        return
+    current = _active_job_count_for_user(user)
+    if current >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "active_job_quota_exceeded",
+                "limit": limit,
+                "current": current,
+                "message": "Active job quota exceeded",
+            },
+        )
+
+
+def _estimate_job_cost_cents(project: Project, job_type: JobType) -> int:
+    duration = max(1, project.duration_minutes)
+    if job_type == JobType.generate_script:
+        return settings.usage_llm_job_cost_cents if project.script_provider.value == "openai" else 0
+    if job_type == JobType.generate_voice:
+        return settings.usage_tts_cost_cents_per_minute * duration if project.voice_provider.value == "openai" else 0
+    if job_type == JobType.render:
+        return settings.usage_render_cost_cents_per_minute * duration
+    if job_type == JobType.generate_all:
+        cost = settings.usage_render_cost_cents_per_minute * duration
+        if project.script_provider.value == "openai":
+            cost += settings.usage_llm_job_cost_cents
+        if project.voice_provider.value == "openai":
+            cost += settings.usage_tts_cost_cents_per_minute * duration
+        return cost
+    return 0
 
 
 def _project_is_visible_to_user(project: Project, user: PlatformUser | None) -> bool:
@@ -512,6 +602,7 @@ def _sync_pipeline_response(project: Project) -> dict:
 
 def _start_project_job(project_id: str, job_type: JobType, request: Request, response: Response) -> dict:
     project = _get_project_or_404(project_id, request)
+    user = _current_user(request)
     key = _idempotency_key(request)
     if key:
         scope = f"jobs:start:{project_id}:{job_type.value}:{project.owner_id or 'public'}"
@@ -521,6 +612,8 @@ def _start_project_job(project_id: str, job_type: JobType, request: Request, res
         if replay is not None:
             return replay
 
+    if job_store.active_for_project(project_id) is None:
+        _enforce_active_job_quota(user)
     job = job_runner.start(project_id, job_type)
     if key:
         idempotency_store.save(
@@ -531,6 +624,15 @@ def _start_project_job(project_id: str, job_type: JobType, request: Request, res
             resource_id=job.id,
         )
         response.headers["x-idempotent-replay"] = "false"
+    usage_service.record(
+        "job.start",
+        actor_id=_actor_id(user),
+        resource_type="job",
+        resource_id=job.id,
+        units=1,
+        estimated_cost_cents=_estimate_job_cost_cents(project, job_type),
+        metadata={"project_id": project_id, "job_type": job_type.value},
+    )
     _audit(
         request,
         "job.start",
@@ -718,6 +820,7 @@ def cleanup() -> dict:
         **auth_service.cleanup_expired_sessions(),
         **idempotency_store.cleanup_old_records(),
         **audit_log.cleanup_old_events(),
+        **usage_service.cleanup_old_events(),
         "retention_days": settings.cleanup_retention_days,
     }
 
@@ -750,6 +853,22 @@ def list_audit_events(
     ]
 
 
+@app.get("/usage/me")
+def usage_me(request: Request) -> dict:
+    user = _current_user(request)
+    actor_id = _actor_id(user)
+    return {
+        "actor_id": actor_id,
+        "limits": _usage_limits(user),
+        "usage": usage_service.summary(actor_id=actor_id if _auth_enabled() else None),
+        "cost_model": {
+            "llm_job_cost_cents": settings.usage_llm_job_cost_cents,
+            "tts_cost_cents_per_minute": settings.usage_tts_cost_cents_per_minute,
+            "render_cost_cents_per_minute": settings.usage_render_cost_cents_per_minute,
+        },
+    }
+
+
 @app.post("/projects")
 def create_project(payload: ProjectCreate, request: Request, response: Response) -> dict:
     user = _current_user(request)
@@ -761,6 +880,7 @@ def create_project(payload: ProjectCreate, request: Request, response: Response)
         replay = _replay_project_record(record, key=key, scope=scope, request=request, response=response)
         if replay is not None:
             return replay
+    _enforce_project_quota(user)
     project = store.create_project(payload, owner_id=user.id if user else None)
     if key:
         idempotency_store.save(
@@ -777,6 +897,15 @@ def create_project(payload: ProjectCreate, request: Request, response: Response)
         actor_id=user.id if user else None,
         resource_type="project",
         resource_id=project.id,
+        metadata={"topic": project.topic},
+    )
+    usage_service.record(
+        "project.create",
+        actor_id=_actor_id(user),
+        resource_type="project",
+        resource_id=project.id,
+        units=1,
+        estimated_cost_cents=0,
         metadata={"topic": project.topic},
     )
     return _with_file_urls(project)
@@ -826,6 +955,7 @@ def delete_project(project_id: str, request: Request) -> Response:
 @app.post("/projects/{project_id}/duplicate")
 def duplicate_project(project_id: str, request: Request, response: Response) -> dict:
     project = _get_project_or_404(project_id, request)
+    user = _current_user(request)
     key = _idempotency_key(request)
     if key:
         scope = f"projects:duplicate:{project_id}:{project.owner_id or 'public'}"
@@ -834,6 +964,7 @@ def duplicate_project(project_id: str, request: Request, response: Response) -> 
         replay = _replay_project_record(record, key=key, scope=scope, request=request, response=response)
         if replay is not None:
             return replay
+    _enforce_project_quota(user)
     duplicate = store.duplicate_project(project_id)
     if key:
         idempotency_store.save(
@@ -850,6 +981,15 @@ def duplicate_project(project_id: str, request: Request, response: Response) -> 
         actor_id=project.owner_id,
         resource_type="project",
         resource_id=duplicate.id,
+        metadata={"source_project_id": project_id},
+    )
+    usage_service.record(
+        "project.duplicate",
+        actor_id=_actor_id(user),
+        resource_type="project",
+        resource_id=duplicate.id,
+        units=1,
+        estimated_cost_cents=0,
         metadata={"source_project_id": project_id},
     )
     return _with_file_urls(duplicate)

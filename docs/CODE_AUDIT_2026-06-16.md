@@ -18,9 +18,10 @@
 - есть базовая auth/ownership foundation: регистрация, логин, bearer-сессии, logout, owner_id у проектов/job, изоляция чужих ресурсов;
 - добавлены hardening-механизмы: API key gate, rate limit, body size limit, SSRF/path traversal checks, render timeout, dependency/secrets checks;
 - добавлены pagination headers и Idempotency-Key для критичных POST endpoints;
-- добавлен file-backed audit log для auth/project/job/scene действий с пользовательской изоляцией.
+- добавлен file-backed audit log для auth/project/job/scene действий с пользовательской изоляцией;
+- добавлен MVP usage/limits/cost tracking слой и secure token persistence в мобильном клиенте через Expo SecureStore.
 
-Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, биллинга, production observability, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
+Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, Stripe/subscriptions, production observability, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
 
 ## 2. Оценка готовности
 
@@ -29,7 +30,7 @@
 | Local demo / технический MVP | 80-85% | Основной pipeline и мобильный MVP работают, тесты покрывают ключевые сценарии. |
 | Внутренний прототип для ограниченной команды | 60-65% | Есть auth foundation и ownership, но storage/job все еще локальные. |
 | Закрытая beta с несколькими пользователями | 45-55% | Нужны Postgres, durable queue, object storage, observability, backup. |
-| Public multi-user SaaS | 35-45% | Нет production auth/RBAC, billing, admin, legal/privacy workflows; audit log пока локальный MVP. |
+| Public multi-user SaaS | 35-45% | Нет production auth/RBAC, Stripe billing, admin, legal/privacy workflows; audit/usage пока локальные MVP. |
 | Enterprise/marketplace platform | 20-30% | Нужны роли, организации, SLA, compliance, мониторинг, политики данных. |
 
 ## 3. Проверенные области
@@ -38,7 +39,7 @@
 
 - FastAPI backend: routes, middleware, auth, project/job/file access.
 - Pydantic models: project, scene, source, result, job, auth DTO.
-- Local storage: JSON project store, job store, auth store, idempotency store, audit log store.
+- Local storage: JSON project store, job store, auth store, idempotency store, audit log store, usage ledger.
 - Pipeline: script, source collection, visual slides, voice, avatar placeholder, render/export.
 - Mobile Expo client: API client, auth flow, project list, project controls, scene editor.
 - Security controls: API key, bearer token, owner checks, path validation, URL validation, rate limit.
@@ -61,6 +62,7 @@
 - scene editor endpoints: patch, insert, delete, reorder, regenerate slide.
 - file endpoint with path and owner checks.
 - manifest/status/result endpoints.
+- usage endpoint: `GET /usage/me`;
 - cleanup endpoint для старых projects/jobs/sessions/idempotency/audit records.
 
 ### API contracts
@@ -114,7 +116,7 @@
 - фильтрация audit events по `resource_type` и `resource_id`;
 - изоляция audit events по текущему bearer user при `ENABLE_USER_AUTH=true`;
 - cleanup старых audit event files через maintenance endpoint;
-- mobile API type/client function для будущего UI журнала.
+- mobile API type/client function и UI panel для журнала.
 
 Ограничения:
 
@@ -123,6 +125,29 @@
 - нет admin-wide audit browser;
 - нет policy для support/super-admin просмотра чужих событий;
 - нет экспорта audit log и retention policies по типам событий.
+
+### Usage, limits and cost tracking
+
+Реализовано:
+
+- file-backed `UsageService`;
+- запись usage events для `project.create`, `project.duplicate`, `job.start`;
+- `GET /usage/me` с текущими лимитами, счетчиками и estimated cost;
+- конфигурируемый лимит проектов через `USAGE_MAX_PROJECTS_PER_USER`;
+- конфигурируемый лимит активных job через `USAGE_MAX_ACTIVE_JOBS_PER_USER`;
+- простая cost-модель через `USAGE_LLM_JOB_COST_CENTS`, `USAGE_TTS_COST_CENTS_PER_MINUTE`, `USAGE_RENDER_COST_CENTS_PER_MINUTE`;
+- `402 project_quota_exceeded` при превышении лимита проектов;
+- `402 active_job_quota_exceeded` при превышении лимита активных job;
+- cleanup старых usage event files;
+- mobile usage panel.
+
+Ограничения:
+
+- это MVP-лимиты, не полноценный Stripe billing;
+- нет подписок, invoice, payment methods и webhooks;
+- нет тарифных планов и промокодов;
+- cost tracking оценочный, не сверяется с реальными provider invoices;
+- usage ledger пока хранится в локальных JSON-файлах.
 
 ### Генерация видео
 
@@ -182,7 +207,7 @@
 Реализовано:
 
 - настройка API base URL и public API key;
-- bearer token storage в памяти с `setAccessToken`;
+- bearer token storage через Expo SecureStore с восстановлением сессии через `/auth/me`;
 - register/login/logout/me;
 - создание проекта;
 - список проектов;
@@ -195,16 +220,17 @@
 - add/delete/regenerate scene slide;
 - scene reorder через move up/down;
 - Idempotency-Key на create/start/duplicate;
-- pagination defaults для projects/job events.
+- pagination defaults для projects/job events;
+- audit log panel;
+- usage/limits/cost summary panel.
 
 Ограничения:
 
-- токен хранится только в памяти, после restart приложения пропадает;
-- нет secure storage;
+- нет refresh token rotation/device session UI;
 - UI пока MVP, без полноценной навигации и production UX;
 - нет push/SSE, только polling;
 - нет upload/asset manager;
-- нет billing/admin screens.
+- нет Stripe billing/admin screens.
 
 ### Infrastructure и CI
 
@@ -262,12 +288,12 @@
 2. Локальная job queue вместо durable queue.
 3. Локальное файловое хранилище вместо object storage.
 4. Нет RBAC/organizations/roles.
-5. Нет billing/subscriptions/limits.
-6. Нет audit log для действий пользователей.
+5. Нет Stripe billing/subscriptions; usage limits есть только как MVP foundation.
+6. Audit log есть только file-backed MVP, без immutable storage/admin-wide browser.
 7. Нет observability и alerting.
 8. Нет backup/restore процесса.
 9. Нет legal consent для voice/avatar.
-10. Нет secure token persistence в mobile.
+10. Нет managed mobile session/device controls поверх SecureStore.
 
 ### P2 для beta
 
@@ -278,7 +304,7 @@
 5. Нужны API response models/OpenAPI polish.
 6. Нужны e2e smoke tests backend-mobile.
 7. Нужно улучшить UX мобильного редактора сцен.
-8. Нужны limits по длительности/стоимости/количеству проектов.
+8. Нужны production тарифы и provider-verified cost reconciliation.
 
 ### P3 улучшения качества
 

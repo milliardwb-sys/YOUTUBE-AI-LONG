@@ -8,6 +8,7 @@ import type {
   ProjectManifest,
   SceneCreate,
   ScenePatch,
+  UsageOverview,
   UserPublic,
 } from './types';
 
@@ -193,6 +194,12 @@ export async function getProjectManifest(projectId: string): Promise<ProjectMani
 export async function getAuditEvents(): Promise<AuditEvent[]> {
   const response = await fetch(`${API_BASE_URL}/audit/events?limit=100&offset=0`, { headers: headers() });
   await assertOk(response, 'Get audit events');
+  return response.json();
+}
+
+export async function getUsageMe(): Promise<UsageOverview> {
+  const response = await fetch(`${API_BASE_URL}/usage/me`, { headers: headers() });
+  await assertOk(response, 'Get usage');
   return response.json();
 }
 

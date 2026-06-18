@@ -59,6 +59,11 @@ def make_settings(tmp_path: Path) -> Settings:
         cleanup_retention_days=14,
         render_timeout_seconds=1800,
         max_request_body_bytes=2_000_000,
+        usage_max_projects_per_user=25,
+        usage_max_active_jobs_per_user=2,
+        usage_llm_job_cost_cents=1,
+        usage_tts_cost_cents_per_minute=1,
+        usage_render_cost_cents_per_minute=2,
     )
 
 
@@ -668,6 +673,64 @@ def test_audit_log_is_isolated_between_users(tmp_path, monkeypatch):
     assert [event["action"] for event in alice_project_events.json()] == ["project.create"]
     assert bob_project_events.status_code == 200
     assert bob_project_events.json() == []
+
+
+def test_usage_endpoint_tracks_project_and_job_events(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("RUN_JOBS_INLINE", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "usage@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/projects",
+        json={"topic": "Usage tracked video project", "script_provider": "openai"},
+        headers=headers,
+    )
+    project_id = created.json()["id"]
+    job = client.post(f"/projects/{project_id}/jobs/generate_script", headers=headers)
+
+    usage = client.get("/usage/me", headers=headers)
+
+    assert job.status_code == 200
+    assert usage.status_code == 200
+    payload = usage.json()
+    assert payload["limits"]["current_projects"] == 1
+    assert payload["usage"]["events_by_action"]["project.create"] == 1
+    assert payload["usage"]["events_by_action"]["job.start"] == 1
+    assert payload["usage"]["estimated_cost_cents"] >= 1
+
+
+def test_project_quota_blocks_new_projects(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("USAGE_MAX_PROJECTS_PER_USER", "1")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "quota@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    first = client.post("/projects", json={"topic": "First quota project"}, headers=headers)
+    second = client.post("/projects", json={"topic": "Second quota project"}, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 402
+    assert second.json()["detail"]["code"] == "project_quota_exceeded"
 
 
 def test_api_key_and_user_auth_are_both_required_when_enabled(tmp_path, monkeypatch):

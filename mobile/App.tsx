@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Button, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -9,9 +9,11 @@ import {
   deleteScene,
   duplicateProject,
   getAuditEvents,
+  getCurrentUser,
   getJob,
   getProject,
   getProjectManifest,
+  getUsageMe,
   insertScene,
   listProjects,
   loginUser,
@@ -24,7 +26,8 @@ import {
   setAccessToken,
   startProjectJob,
 } from './src/api';
-import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UserPublic } from './src/types';
+import { clearSessionToken, loadSessionToken, saveSessionToken } from './src/session';
+import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UsageOverview, UserPublic } from './src/types';
 
 export default function App() {
   const [topic, setTopic] = useState('5 AI-сервисов для создания видео в 2026 году');
@@ -41,6 +44,8 @@ export default function App() {
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [usage, setUsage] = useState<UsageOverview | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<UserPublic | null>(null);
   const [authEmail, setAuthEmail] = useState('owner@example.com');
@@ -49,6 +54,35 @@ export default function App() {
   const [sceneTitle, setSceneTitle] = useState('');
   const [sceneNarration, setSceneNarration] = useState('');
   const [sceneDuration, setSceneDuration] = useState('12');
+
+  useEffect(() => {
+    let active = true;
+
+    async function restoreSession() {
+      setAuthBusy(true);
+      try {
+        const token = await loadSessionToken();
+        if (!active || !token) return;
+        setAccessToken(token);
+        const user = await getCurrentUser();
+        if (!active) return;
+        setAuthUser(user);
+        await refreshProjects();
+        await refreshAuditEvents();
+        await refreshUsage();
+      } catch {
+        setAccessToken(null);
+        await clearSessionToken();
+      } finally {
+        if (active) setAuthBusy(false);
+      }
+    }
+
+    restoreSession();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleGenerate() {
     setLoading(true);
@@ -66,6 +100,7 @@ export default function App() {
       setProject(created);
       await refreshProjects();
       await refreshAuditEvents();
+      await refreshUsage();
 
       const queuedJob = await startProjectJob(created.id, 'generate_all');
       setJob(queuedJob);
@@ -84,6 +119,7 @@ export default function App() {
       const payload = action === 'login'
         ? await loginUser(authEmail.trim(), authPassword)
         : await registerUser(authEmail.trim(), authPassword);
+      await saveSessionToken(payload.access_token);
       setAuthUser(payload.user);
       await refreshProjects();
       await refreshAuditEvents();
@@ -102,10 +138,12 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Logout failed');
     } finally {
+      await clearSessionToken();
       setAccessToken(null);
       setAuthUser(null);
       setProjects([]);
       setAuditEvents([]);
+      setUsage(null);
       setProject(null);
       setJob(null);
       setManifest(null);
@@ -132,6 +170,17 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'Load audit events failed');
     } finally {
       setAuditLoading(false);
+    }
+  }
+
+  async function refreshUsage() {
+    setUsageLoading(true);
+    try {
+      setUsage(await getUsageMe());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Load usage failed');
+    } finally {
+      setUsageLoading(false);
     }
   }
 
@@ -171,6 +220,7 @@ export default function App() {
       selectScene(copy.scenes?.[0] ?? null);
       await refreshProjects();
       await refreshAuditEvents();
+      await refreshUsage();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Duplicate project failed');
     } finally {
@@ -190,6 +240,7 @@ export default function App() {
       selectScene(null);
       await refreshProjects();
       await refreshAuditEvents();
+      await refreshUsage();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete project failed');
     } finally {
@@ -212,6 +263,7 @@ export default function App() {
     selectScene(finalProject.scenes?.[0] ?? null);
     await refreshProjects();
     await refreshAuditEvents();
+    await refreshUsage();
     if (currentJob.status === 'failed') {
       setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
     }
@@ -231,6 +283,7 @@ export default function App() {
         setManifest(await getProjectManifest(project.id));
         await refreshProjects();
         await refreshAuditEvents();
+        await refreshUsage();
       }
       setLoading(false);
     } catch (err) {
@@ -248,6 +301,7 @@ export default function App() {
       setManifest(null);
       await pollJob(project.id, retried);
       await refreshAuditEvents();
+      await refreshUsage();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Retry failed');
     } finally {
@@ -260,6 +314,7 @@ export default function App() {
     setManifest(await getProjectManifest(updated.id));
     await refreshProjects();
     await refreshAuditEvents();
+    await refreshUsage();
   }
 
   async function handleSaveScene() {
@@ -436,6 +491,29 @@ export default function App() {
                 <Button title="Open" onPress={() => handleOpenProject(item.id)} disabled={loading} />
               </View>
             ))
+          )}
+        </View>
+
+        <View style={styles.usagePanel}>
+          <View style={styles.authRow}>
+            <Text style={styles.sectionTitle}>Usage</Text>
+            <Button title={usageLoading ? 'Loading' : 'Refresh'} onPress={refreshUsage} disabled={usageLoading || loading} />
+          </View>
+          {usage ? (
+            <>
+              <Text style={styles.usageText}>
+                Projects: {usage.limits.current_projects}/{usage.limits.max_projects || '∞'}
+              </Text>
+              <Text style={styles.usageText}>
+                Active jobs: {usage.limits.current_active_jobs}/{usage.limits.max_active_jobs || '∞'}
+              </Text>
+              <Text style={styles.usageText}>
+                Estimated cost: ${(usage.usage.estimated_cost_cents / 100).toFixed(2)}
+              </Text>
+              <Text style={styles.usageMeta}>Events: {usage.usage.event_count} · Units: {usage.usage.total_units}</Text>
+            </>
+          ) : (
+            <Text style={styles.emptyText}>No usage loaded</Text>
           )}
         </View>
 
@@ -634,6 +712,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#c8d0ee' },
   authPanel: { backgroundColor: '#1d2440', borderRadius: 8, padding: 14, gap: 10 },
   projectListPanel: { backgroundColor: '#162034', borderRadius: 8, padding: 14, gap: 10 },
+  usagePanel: { backgroundColor: '#1f2a19', borderRadius: 8, padding: 14, gap: 8 },
   auditPanel: { backgroundColor: '#132b2f', borderRadius: 8, padding: 14, gap: 10 },
   sectionTitle: { color: 'white', fontWeight: '800', fontSize: 16 },
   authRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -661,6 +740,8 @@ const styles = StyleSheet.create({
   auditItem: { backgroundColor: '#ecfeff', borderRadius: 8, padding: 10 },
   auditAction: { color: '#0f172a', fontWeight: '800' },
   auditMeta: { color: '#475569', marginTop: 2, fontSize: 12 },
+  usageText: { color: '#ecfccb', fontWeight: '700' },
+  usageMeta: { color: '#d9f99d', fontSize: 12 },
   label: { color: 'white', fontWeight: '700', marginTop: 16 },
   input: {
     minHeight: 110,

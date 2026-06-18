@@ -21,6 +21,8 @@
 - добавлять, удалять и регенерировать slide для выбранной сцены;
 - менять порядок сцен через move up/down;
 - загружать и показывать последние audit events через `GET /audit/events`;
+- сохранять bearer token в Expo SecureStore и восстанавливать сессию при запуске приложения;
+- показывать usage/limits/cost summary через `GET /usage/me`;
 - показать progress, статус, warnings, источники, сцены и ссылки на результат.
 
 Запуск:
@@ -46,7 +48,7 @@ EXPO_PUBLIC_API_KEY=
 
 На физическом телефоне используйте IP компьютера в локальной сети: `EXPO_PUBLIC_API_BASE_URL=http://<LAN_IP>:8000`. Если backend запущен с `API_KEY`, тот же ключ нужно передать в `EXPO_PUBLIC_API_KEY`.
 
-Если backend запущен с `ENABLE_USER_AUTH=true`, используйте блок `Account` в приложении. После login/register клиент добавляет `Authorization: Bearer <token>` ко всем project/job/file API requests. Logout вызывает `/auth/logout`, отзывает backend session и очищает локальный token. Bearer token не задаётся через Expo env и живёт только в текущей сессии приложения.
+Если backend запущен с `ENABLE_USER_AUTH=true`, используйте блок `Account` в приложении. После login/register клиент добавляет `Authorization: Bearer <token>` ко всем project/job/file API requests. Logout вызывает `/auth/logout`, отзывает backend session и очищает локальный token. Bearer token не задаётся через Expo env; на мобильных платформах он хранится в Expo SecureStore и восстанавливается через `/auth/me` при следующем запуске приложения.
 
 Проверки:
 

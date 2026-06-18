@@ -180,3 +180,24 @@ export type AuditEvent = {
   metadata: Record<string, unknown>;
   created_at: string;
 };
+
+export type UsageOverview = {
+  actor_id?: string | null;
+  limits: {
+    max_projects: number;
+    max_active_jobs: number;
+    current_projects: number;
+    current_active_jobs: number;
+  };
+  usage: {
+    event_count: number;
+    total_units: number;
+    estimated_cost_cents: number;
+    events_by_action: Record<string, number>;
+  };
+  cost_model: {
+    llm_job_cost_cents: number;
+    tts_cost_cents_per_minute: number;
+    render_cost_cents_per_minute: number;
+  };
+};

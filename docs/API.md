@@ -70,6 +70,49 @@ GET /audit/events?resource_type=project&resource_id=project_...
 
 When `ENABLE_USER_AUTH=true`, this endpoint returns only events created by the current bearer user. When user auth is disabled, it returns local MVP-wide events and is protected by the same API key middleware as other private endpoints. `POST /maintenance/cleanup` removes old audit event files and returns `removed_audit_events` / `skipped_audit_events`.
 
+## Usage, limits and cost tracking
+
+Backend keeps a local file-backed usage ledger for MVP billing/limits foundations. Current usage is available through:
+
+```text
+GET /usage/me
+```
+
+The response includes current project count, active job count, usage event totals and estimated cost in cents:
+
+```json
+{
+  "actor_id": "user_...",
+  "limits": {
+    "max_projects": 25,
+    "max_active_jobs": 2,
+    "current_projects": 1,
+    "current_active_jobs": 0
+  },
+  "usage": {
+    "event_count": 2,
+    "total_units": 2,
+    "estimated_cost_cents": 3,
+    "events_by_action": {
+      "project.create": 1,
+      "job.start": 1
+    }
+  }
+}
+```
+
+Config:
+
+```text
+USAGE_MAX_PROJECTS_PER_USER=25
+USAGE_MAX_ACTIVE_JOBS_PER_USER=2
+USAGE_LLM_JOB_COST_CENTS=1
+USAGE_TTS_COST_CENTS_PER_MINUTE=1
+USAGE_RENDER_COST_CENTS_PER_MINUTE=2
+```
+
+`0` disables a limit. Project creation and project duplication return `402` with `project_quota_exceeded` when the project quota is exhausted. Starting a new job returns `402` with `active_job_quota_exceeded` when the active job quota is exhausted. Existing active jobs for the same project are reused instead of counted as new jobs.
+
 ## Rate limiting
 
 Встроенный in-memory limiter включается через:

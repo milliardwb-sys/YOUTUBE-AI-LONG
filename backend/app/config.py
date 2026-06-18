@@ -48,6 +48,11 @@ class Settings:
     cleanup_retention_days: int
     render_timeout_seconds: int
     max_request_body_bytes: int
+    usage_max_projects_per_user: int
+    usage_max_active_jobs_per_user: int
+    usage_llm_job_cost_cents: int
+    usage_tts_cost_cents_per_minute: int
+    usage_render_cost_cents_per_minute: int
 
 
 class ConfigurationError(RuntimeError):
@@ -132,6 +137,11 @@ def get_settings() -> Settings:
         cleanup_retention_days=_env_int("CLEANUP_RETENTION_DAYS", 14),
         render_timeout_seconds=max(1, _env_int("RENDER_TIMEOUT_SECONDS", 1800)),
         max_request_body_bytes=max(0, _env_int("MAX_REQUEST_BODY_BYTES", 2_000_000)),
+        usage_max_projects_per_user=max(0, _env_int("USAGE_MAX_PROJECTS_PER_USER", 25)),
+        usage_max_active_jobs_per_user=max(0, _env_int("USAGE_MAX_ACTIVE_JOBS_PER_USER", 2)),
+        usage_llm_job_cost_cents=max(0, _env_int("USAGE_LLM_JOB_COST_CENTS", 1)),
+        usage_tts_cost_cents_per_minute=max(0, _env_int("USAGE_TTS_COST_CENTS_PER_MINUTE", 1)),
+        usage_render_cost_cents_per_minute=max(0, _env_int("USAGE_RENDER_COST_CENTS_PER_MINUTE", 2)),
     )
     validate_settings(settings)
     return settings
