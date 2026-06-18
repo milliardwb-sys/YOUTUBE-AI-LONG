@@ -34,6 +34,7 @@ from app.services.auth_service import (
     SessionNotFoundError,
     UserAlreadyExistsError,
 )
+from app.services.audit_log_service import AuditLogService
 from app.services.compliance_service import ComplianceService
 from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
 from app.services.idempotency_service import (
@@ -68,6 +69,7 @@ job_store = JobStore(settings)
 job_runner = JobRunner(settings, pipeline, job_store)
 auth_service = AuthService(settings)
 idempotency_store = IdempotencyStore(settings)
+audit_log = AuditLogService(settings)
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
 
@@ -327,6 +329,29 @@ def _set_pagination_headers(response: Response, *, total: int, limit: int, offse
     response.headers["x-offset"] = str(offset)
 
 
+def _request_id(request: Request) -> str | None:
+    return getattr(request.state, "request_id", None)
+
+
+def _audit(
+    request: Request,
+    action: str,
+    *,
+    actor_id: str | None = None,
+    resource_type: str = "system",
+    resource_id: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    audit_log.record(
+        action,
+        actor_id=actor_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        request_id=_request_id(request),
+        metadata=metadata,
+    )
+
+
 def _project_is_visible_to_user(project: Project, user: PlatformUser | None) -> bool:
     if not _auth_enabled():
         return True
@@ -506,6 +531,14 @@ def _start_project_job(project_id: str, job_type: JobType, request: Request, res
             resource_id=job.id,
         )
         response.headers["x-idempotent-replay"] = "false"
+    _audit(
+        request,
+        "job.start",
+        actor_id=project.owner_id,
+        resource_type="job",
+        resource_id=job.id,
+        metadata={"project_id": project_id, "job_type": job_type.value},
+    )
     return job.model_dump(mode="json")
 
 
@@ -595,21 +628,25 @@ def _data_dir_is_writable() -> bool:
 
 
 @app.post("/auth/register")
-def register_user(payload: UserCreate) -> dict:
+def register_user(payload: UserCreate, request: Request) -> dict:
     if not _auth_enabled():
         raise HTTPException(status_code=404, detail="User auth is disabled")
     try:
-        return auth_service.register(payload).model_dump(mode="json")
+        token = auth_service.register(payload)
+        _audit(request, "auth.register", actor_id=token.user.id, resource_type="user", resource_id=token.user.id)
+        return token.model_dump(mode="json")
     except UserAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @app.post("/auth/login")
-def login_user(payload: UserLogin) -> dict:
+def login_user(payload: UserLogin, request: Request) -> dict:
     if not _auth_enabled():
         raise HTTPException(status_code=404, detail="User auth is disabled")
     try:
-        return auth_service.login(payload).model_dump(mode="json")
+        token = auth_service.login(payload)
+        _audit(request, "auth.login", actor_id=token.user.id, resource_type="user", resource_id=token.user.id)
+        return token.model_dump(mode="json")
     except InvalidCredentialsError:
         raise HTTPException(status_code=401, detail="Invalid email or password") from None
 
@@ -626,9 +663,12 @@ def auth_me(request: Request) -> dict:
 def logout_user(request: Request) -> dict:
     if not _auth_enabled():
         raise HTTPException(status_code=404, detail="User auth is disabled")
-    _current_user(request)
+    user = _current_user(request)
     token = _bearer_token(request)
-    return {"revoked": auth_service.revoke_token(token or "")}
+    revoked = auth_service.revoke_token(token or "")
+    if user:
+        _audit(request, "auth.logout", actor_id=user.id, resource_type="user", resource_id=user.id)
+    return {"revoked": revoked}
 
 
 @app.get("/providers")
@@ -677,8 +717,37 @@ def cleanup() -> dict:
         **job_store.cleanup_old_jobs(),
         **auth_service.cleanup_expired_sessions(),
         **idempotency_store.cleanup_old_records(),
+        **audit_log.cleanup_old_events(),
         "retention_days": settings.cleanup_retention_days,
     }
+
+
+@app.get("/audit/events")
+def list_audit_events(
+    request: Request,
+    response: Response,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    user = _current_user(request)
+    actor_id = user.id if _auth_enabled() and user else None
+    events = audit_log.list_events(actor_id=actor_id, resource_type=resource_type, resource_id=resource_id)
+    _set_pagination_headers(response, total=len(events), limit=limit, offset=offset)
+    return [
+        {
+            "id": event.id,
+            "action": event.action,
+            "actor_id": event.actor_id,
+            "resource_type": event.resource_type,
+            "resource_id": event.resource_id,
+            "request_id": event.request_id,
+            "metadata": event.metadata,
+            "created_at": event.created_at.isoformat(),
+        }
+        for event in events[offset : offset + limit]
+    ]
 
 
 @app.post("/projects")
@@ -702,6 +771,14 @@ def create_project(payload: ProjectCreate, request: Request, response: Response)
             resource_id=project.id,
         )
         response.headers["x-idempotent-replay"] = "false"
+    _audit(
+        request,
+        "project.create",
+        actor_id=user.id if user else None,
+        resource_type="project",
+        resource_id=project.id,
+        metadata={"topic": project.topic},
+    )
     return _with_file_urls(project)
 
 
@@ -725,14 +802,24 @@ def get_project(project_id: str, request: Request) -> dict:
 
 @app.patch("/projects/{project_id}")
 def update_project(project_id: str, payload: ProjectUpdate, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
-    return _with_file_urls(store.update_project(project_id, payload))
+    project = _get_project_or_404(project_id, request)
+    updated = store.update_project(project_id, payload)
+    _audit(
+        request,
+        "project.update",
+        actor_id=project.owner_id,
+        resource_type="project",
+        resource_id=project_id,
+        metadata={"fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+    )
+    return _with_file_urls(updated)
 
 
 @app.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: str, request: Request) -> Response:
-    _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request)
     store.delete_project(project_id)
+    _audit(request, "project.delete", actor_id=project.owner_id, resource_type="project", resource_id=project_id)
     return Response(status_code=204)
 
 
@@ -757,6 +844,14 @@ def duplicate_project(project_id: str, request: Request, response: Response) -> 
             resource_id=duplicate.id,
         )
         response.headers["x-idempotent-replay"] = "false"
+    _audit(
+        request,
+        "project.duplicate",
+        actor_id=project.owner_id,
+        resource_type="project",
+        resource_id=duplicate.id,
+        metadata={"source_project_id": project_id},
+    )
     return _with_file_urls(duplicate)
 
 
@@ -819,9 +914,18 @@ def get_job(job_id: str, request: Request) -> dict:
 
 @app.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, request: Request) -> dict:
-    _get_job_or_404(job_id, request)
+    visible_job = _get_job_or_404(job_id, request)
     try:
-        return job_runner.cancel(job_id).model_dump(mode="json")
+        job = job_runner.cancel(job_id)
+        _audit(
+            request,
+            "job.cancel",
+            actor_id=visible_job.owner_id,
+            resource_type="job",
+            resource_id=job.id,
+            metadata={"project_id": job.project_id},
+        )
+        return job.model_dump(mode="json")
     except (InvalidIdentifierError, UnsafePathError):
         raise HTTPException(status_code=404, detail="Job not found") from None
     except JobNotFoundError:
@@ -832,9 +936,18 @@ def cancel_job(job_id: str, request: Request) -> dict:
 
 @app.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str, request: Request) -> dict:
-    _get_job_or_404(job_id, request)
+    visible_job = _get_job_or_404(job_id, request)
     try:
-        return job_runner.retry(job_id).model_dump(mode="json")
+        job = job_runner.retry(job_id)
+        _audit(
+            request,
+            "job.retry",
+            actor_id=visible_job.owner_id,
+            resource_type="job",
+            resource_id=job.id,
+            metadata={"original_job_id": job_id, "project_id": job.project_id},
+        )
+        return job.model_dump(mode="json")
     except (InvalidIdentifierError, UnsafePathError):
         raise HTTPException(status_code=404, detail="Job not found") from None
     except JobNotFoundError:
@@ -872,36 +985,74 @@ def list_project_jobs(
 
 @app.patch("/projects/{project_id}/scenes/{scene_id}")
 def patch_scene(project_id: str, scene_id: str, payload: ScenePatch, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request)
     try:
-        return _with_file_urls(store.patch_scene(project_id, scene_id, payload))
+        updated = store.patch_scene(project_id, scene_id, payload)
+        _audit(
+            request,
+            "scene.update",
+            actor_id=project.owner_id,
+            resource_type="scene",
+            resource_id=scene_id,
+            metadata={"project_id": project_id, "fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+        )
+        return _with_file_urls(updated)
     except SceneNotFoundError:
         raise HTTPException(status_code=404, detail="Scene not found") from None
 
 
 @app.post("/projects/{project_id}/scenes")
 def insert_scene(project_id: str, payload: SceneCreate, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request)
     try:
-        return _with_file_urls(store.insert_scene(project_id, payload))
+        existing_scene_ids = {scene.id for scene in project.scenes}
+        updated = store.insert_scene(project_id, payload)
+        inserted = next((scene for scene in updated.scenes if scene.id not in existing_scene_ids), updated.scenes[-1])
+        _audit(
+            request,
+            "scene.create",
+            actor_id=project.owner_id,
+            resource_type="scene",
+            resource_id=inserted.id,
+            metadata={"project_id": project_id},
+        )
+        return _with_file_urls(updated)
     except SceneNotFoundError:
         raise HTTPException(status_code=404, detail="Scene not found") from None
 
 
 @app.delete("/projects/{project_id}/scenes/{scene_id}")
 def delete_scene(project_id: str, scene_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request)
     try:
-        return _with_file_urls(store.delete_scene(project_id, scene_id))
+        updated = store.delete_scene(project_id, scene_id)
+        _audit(
+            request,
+            "scene.delete",
+            actor_id=project.owner_id,
+            resource_type="scene",
+            resource_id=scene_id,
+            metadata={"project_id": project_id},
+        )
+        return _with_file_urls(updated)
     except SceneNotFoundError:
         raise HTTPException(status_code=404, detail="Scene not found") from None
 
 
 @app.post("/projects/{project_id}/scenes/reorder")
 def reorder_scenes(project_id: str, payload: SceneReorder, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request)
     try:
-        return _with_file_urls(store.reorder_scenes(project_id, payload))
+        updated = store.reorder_scenes(project_id, payload)
+        _audit(
+            request,
+            "scene.reorder",
+            actor_id=project.owner_id,
+            resource_type="project",
+            resource_id=project_id,
+            metadata={"scene_count": len(payload.scene_ids)},
+        )
+        return _with_file_urls(updated)
     except InvalidSceneOrderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 

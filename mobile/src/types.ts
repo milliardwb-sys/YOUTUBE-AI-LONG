@@ -169,3 +169,14 @@ export type AuthToken = {
   expires_at: string;
   user: UserPublic;
 };
+
+export type AuditEvent = {
+  id: string;
+  action: string;
+  actor_id?: string | null;
+  resource_type: string;
+  resource_id?: string | null;
+  request_id?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};

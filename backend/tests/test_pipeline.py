@@ -602,6 +602,74 @@ def test_user_auth_isolates_projects_jobs_and_files(tmp_path, monkeypatch):
     assert client.get(f"/jobs/{job.id}", headers=bob_headers).status_code == 404
 
 
+def test_audit_log_records_user_project_and_job_actions(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("RUN_JOBS_INLINE", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "audit@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post("/projects", json={"topic": "Audit tracked video project"}, headers=headers)
+    project_id = created.json()["id"]
+    job = client.post(f"/projects/{project_id}/jobs/generate_script", headers=headers)
+
+    events = client.get("/audit/events?limit=10&offset=0", headers=headers)
+    actions = {event["action"] for event in events.json()}
+
+    assert job.status_code == 200
+    assert events.status_code == 200
+    assert events.headers["x-total-count"] == "3"
+    assert {"auth.register", "project.create", "job.start"}.issubset(actions)
+    assert all(event["actor_id"] == created.json()["owner_id"] for event in events.json())
+    assert all(event["request_id"] for event in events.json())
+
+
+def test_audit_log_is_isolated_between_users(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    alice = client.post(
+        "/auth/register",
+        json={"email": "audit-alice@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    bob = client.post(
+        "/auth/register",
+        json={"email": "audit-bob@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    alice_headers = {"Authorization": f"Bearer {alice}"}
+    bob_headers = {"Authorization": f"Bearer {bob}"}
+
+    created = client.post("/projects", json={"topic": "Alice audit project"}, headers=alice_headers)
+    project_id = created.json()["id"]
+
+    alice_project_events = client.get(
+        f"/audit/events?resource_type=project&resource_id={project_id}",
+        headers=alice_headers,
+    )
+    bob_project_events = client.get(
+        f"/audit/events?resource_type=project&resource_id={project_id}",
+        headers=bob_headers,
+    )
+
+    assert alice_project_events.status_code == 200
+    assert [event["action"] for event in alice_project_events.json()] == ["project.create"]
+    assert bob_project_events.status_code == 200
+    assert bob_project_events.json() == []
+
+
 def test_api_key_and_user_auth_are_both_required_when_enabled(tmp_path, monkeypatch):
     api_key = "prod-api-key-with-more-than-thirty-two-characters"
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

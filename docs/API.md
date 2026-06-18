@@ -40,6 +40,36 @@ POST /auth/logout
 
 `POST /auth/logout` revokes the current bearer session. `POST /maintenance/cleanup` also removes expired auth session files and returns `removed_sessions` / `skipped_sessions`.
 
+## Audit log
+
+Backend writes local audit events for core user/project/job/scene actions:
+
+```text
+auth.register
+auth.login
+auth.logout
+project.create
+project.update
+project.delete
+project.duplicate
+job.start
+job.cancel
+job.retry
+scene.create
+scene.update
+scene.delete
+scene.reorder
+```
+
+Events are available through:
+
+```text
+GET /audit/events?limit=100&offset=0
+GET /audit/events?resource_type=project&resource_id=project_...
+```
+
+When `ENABLE_USER_AUTH=true`, this endpoint returns only events created by the current bearer user. When user auth is disabled, it returns local MVP-wide events and is protected by the same API key middleware as other private endpoints. `POST /maintenance/cleanup` removes old audit event files and returns `removed_audit_events` / `skipped_audit_events`.
+
 ## Rate limiting
 
 Встроенный in-memory limiter включается через:
@@ -75,6 +105,7 @@ List endpoints keep the old response shape as a JSON array, but now support boun
 GET /projects?limit=50&offset=0
 GET /projects/{id}/jobs?limit=50&offset=0
 GET /jobs/{job_id}/events?limit=100&offset=0
+GET /audit/events?limit=100&offset=0
 ```
 
 Responses include:

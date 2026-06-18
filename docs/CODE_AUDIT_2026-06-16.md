@@ -17,9 +17,10 @@
 - мобильный Expo-клиент умеет создавать проекты, авторизоваться, видеть список проектов, открывать старые проекты, редактировать сцены и управлять job;
 - есть базовая auth/ownership foundation: регистрация, логин, bearer-сессии, logout, owner_id у проектов/job, изоляция чужих ресурсов;
 - добавлены hardening-механизмы: API key gate, rate limit, body size limit, SSRF/path traversal checks, render timeout, dependency/secrets checks;
-- добавлены pagination headers и Idempotency-Key для критичных POST endpoints.
+- добавлены pagination headers и Idempotency-Key для критичных POST endpoints;
+- добавлен file-backed audit log для auth/project/job/scene действий с пользовательской изоляцией.
 
-Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, биллинга, observability, audit log, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
+Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, биллинга, production observability, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
 
 ## 2. Оценка готовности
 
@@ -28,7 +29,7 @@
 | Local demo / технический MVP | 80-85% | Основной pipeline и мобильный MVP работают, тесты покрывают ключевые сценарии. |
 | Внутренний прототип для ограниченной команды | 60-65% | Есть auth foundation и ownership, но storage/job все еще локальные. |
 | Закрытая beta с несколькими пользователями | 45-55% | Нужны Postgres, durable queue, object storage, observability, backup. |
-| Public multi-user SaaS | 35-45% | Нет production auth/RBAC, billing, admin, audit log, legal/privacy workflows. |
+| Public multi-user SaaS | 35-45% | Нет production auth/RBAC, billing, admin, legal/privacy workflows; audit log пока локальный MVP. |
 | Enterprise/marketplace platform | 20-30% | Нужны роли, организации, SLA, compliance, мониторинг, политики данных. |
 
 ## 3. Проверенные области
@@ -37,7 +38,7 @@
 
 - FastAPI backend: routes, middleware, auth, project/job/file access.
 - Pydantic models: project, scene, source, result, job, auth DTO.
-- Local storage: JSON project store, job store, auth store, idempotency store.
+- Local storage: JSON project store, job store, auth store, idempotency store, audit log store.
 - Pipeline: script, source collection, visual slides, voice, avatar placeholder, render/export.
 - Mobile Expo client: API client, auth flow, project list, project controls, scene editor.
 - Security controls: API key, bearer token, owner checks, path validation, URL validation, rate limit.
@@ -60,7 +61,7 @@
 - scene editor endpoints: patch, insert, delete, reorder, regenerate slide.
 - file endpoint with path and owner checks.
 - manifest/status/result endpoints.
-- cleanup endpoint для старых projects/jobs/sessions/idempotency records.
+- cleanup endpoint для старых projects/jobs/sessions/idempotency/audit records.
 
 ### API contracts
 
@@ -99,6 +100,29 @@
 - нет refresh tokens;
 - нет device/session management UI;
 - нет ролей и permissions.
+
+### Audit log
+
+Реализовано:
+
+- file-backed `AuditLogService`;
+- запись событий `auth.register`, `auth.login`, `auth.logout`;
+- запись событий `project.create`, `project.update`, `project.delete`, `project.duplicate`;
+- запись событий `job.start`, `job.cancel`, `job.retry`;
+- запись событий `scene.create`, `scene.update`, `scene.delete`, `scene.reorder`;
+- `GET /audit/events` с pagination headers;
+- фильтрация audit events по `resource_type` и `resource_id`;
+- изоляция audit events по текущему bearer user при `ENABLE_USER_AUTH=true`;
+- cleanup старых audit event files через maintenance endpoint;
+- mobile API type/client function для будущего UI журнала.
+
+Ограничения:
+
+- audit log пока хранится в локальных JSON-файлах;
+- нет immutable DB/WORM storage;
+- нет admin-wide audit browser;
+- нет policy для support/super-admin просмотра чужих событий;
+- нет экспорта audit log и retention policies по типам событий.
 
 ### Генерация видео
 
