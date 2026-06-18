@@ -372,6 +372,117 @@ def test_api_import_and_delete_smoke(tmp_path, monkeypatch):
     assert deleted.status_code == 204
 
 
+def test_api_project_create_idempotency_key_replays_same_resource(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    headers = {"Idempotency-Key": "project-create-01"}
+    payload = {"topic": "Retry safe API project creation"}
+    first = client.post("/projects", json=payload, headers=headers)
+    second = client.post("/projects", json=payload, headers=headers)
+    conflict = client.post("/projects", json={"topic": "Different retry payload"}, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    assert first.headers["x-idempotent-replay"] == "false"
+    assert second.headers["x-idempotent-replay"] == "true"
+    assert conflict.status_code == 409
+
+
+def test_api_rejects_invalid_idempotency_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/projects",
+        json={"topic": "Project with invalid idempotency key"},
+        headers={"Idempotency-Key": "bad key"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["status_code"] == 400
+
+
+def test_api_list_projects_supports_pagination_headers(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    for index in range(3):
+        response = client.post("/projects", json={"topic": f"Paginated API project {index}"})
+        assert response.status_code == 200
+
+    page = client.get("/projects?limit=2&offset=1")
+
+    assert page.status_code == 200
+    assert page.headers["x-total-count"] == "3"
+    assert page.headers["x-limit"] == "2"
+    assert page.headers["x-offset"] == "1"
+    assert len(page.json()) == 2
+
+
+def test_api_job_start_idempotency_key_replays_same_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUN_JOBS_INLINE", "true")
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post("/projects", json={"topic": "Retry safe queued job project"})
+    project_id = created.json()["id"]
+    headers = {"Idempotency-Key": "job-start-01"}
+    first = client.post(f"/projects/{project_id}/jobs/generate_script", headers=headers)
+    second = client.post(f"/projects/{project_id}/jobs/generate_script", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["id"] == second.json()["id"]
+    assert first.headers["x-idempotent-replay"] == "false"
+    assert second.headers["x-idempotent-replay"] == "true"
+
+
+def test_api_project_jobs_and_events_support_pagination_headers(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post("/projects", json={"topic": "Paginated project jobs"})
+    project_id = created.json()["id"]
+    jobs = [main.job_store.create(project_id, JobType.generate_script) for _ in range(3)]
+    job_with_events = jobs[0]
+    job_with_events.add_event("step_one", "one", 10)
+    job_with_events.add_event("step_two", "two", 20)
+    job_with_events.add_event("step_three", "three", 30)
+    main.job_store.save(job_with_events)
+
+    jobs_page = client.get(f"/projects/{project_id}/jobs?limit=2&offset=1")
+    events_page = client.get(f"/jobs/{job_with_events.id}/events?limit=2&offset=1")
+
+    assert jobs_page.status_code == 200
+    assert jobs_page.headers["x-total-count"] == "3"
+    assert len(jobs_page.json()) == 2
+    assert events_page.status_code == 200
+    assert events_page.headers["x-total-count"] == "4"
+    assert len(events_page.json()) == 2
+
+
 def test_api_key_protects_non_public_routes(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     api_key = "test-secret-value-with-more-than-32-chars"

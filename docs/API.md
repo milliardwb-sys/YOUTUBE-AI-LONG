@@ -67,7 +67,65 @@ Retry-After
 MAX_REQUEST_BODY_BYTES=2000000
 ```
 
+## Pagination
+
+List endpoints keep the old response shape as a JSON array, but now support bounded pagination:
+
+```text
+GET /projects?limit=50&offset=0
+GET /projects/{id}/jobs?limit=50&offset=0
+GET /jobs/{job_id}/events?limit=100&offset=0
+```
+
+Responses include:
+
+```text
+X-Total-Count
+X-Limit
+X-Offset
+```
+
+`limit` is capped by the backend: projects/jobs up to `200`, job events up to `500`.
+
+## Idempotency
+
+Retry-sensitive POST endpoints accept:
+
+```text
+Idempotency-Key: <stable-client-generated-key>
+```
+
+Currently supported:
+
+```text
+POST /projects
+POST /projects/{id}/duplicate
+POST /projects/{id}/jobs/{job_type}
+POST /projects/{id}/generate-all-queued
+```
+
+The same key with the same request returns the original project/job and adds:
+
+```text
+X-Idempotent-Replay: true
+```
+
+The same key reused for a different request returns `409`. Keys must be 8-128 characters and may contain letters, digits, `.`, `_`, `:` and `-`.
+
 ## Error contract
+
+All HTTP errors keep the legacy `detail` field and also include a structured `error` object:
+
+```json
+{
+  "detail": "Project not found",
+  "error": {
+    "status_code": 404,
+    "message": "Project not found",
+    "request_id": "req_..."
+  }
+}
+```
 
 Синхронные pipeline endpoints возвращают HTTP-ошибку, если шаг не выполнен: `400` для compliance, `404` для not found, `409` для precondition failure и `500` для runtime/render/provider failure. Job endpoints отдают ошибки через `GET /jobs/{job_id}`.
 
@@ -254,7 +312,13 @@ neon
 
 ## GET /projects
 
-Список проектов.
+Список проектов, новые сверху.
+
+```text
+GET /projects?limit=50&offset=0
+```
+
+Ответ остаётся массивом проектов. Общее количество доступно в `X-Total-Count`.
 
 ## GET /projects/{id}
 
@@ -329,6 +393,8 @@ POST /projects/{id}/jobs/generate_all
 
 Если у проекта уже есть `queued` или `running` job, backend вернёт существующую активную job вместо запуска второй параллельной генерации.
 
+Для защиты от повторного запуска при сетевом retry можно передать `Idempotency-Key`.
+
 ### GET /jobs/{job_id}
 
 Возвращает статус job.
@@ -386,9 +452,17 @@ POST /projects/{id}/jobs/generate_all
 
 Возвращает список задач проекта, новые сверху.
 
+```text
+GET /projects/{id}/jobs?limit=50&offset=0
+```
+
 ### GET /jobs/{job_id}/events
 
 Возвращает историю событий job: постановка в очередь, запуск, progress steps, отмена, retry, failed/completed.
+
+```text
+GET /jobs/{job_id}/events?limit=100&offset=0
+```
 
 ```json
 [

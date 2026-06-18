@@ -6,7 +6,9 @@ from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
@@ -34,6 +36,12 @@ from app.services.auth_service import (
 )
 from app.services.compliance_service import ComplianceService
 from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
+from app.services.idempotency_service import (
+    IdempotencyConflictError,
+    IdempotencyRecord,
+    IdempotencyStore,
+    InvalidIdempotencyKeyError,
+)
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
 from app.services.source_service import SourceService
@@ -59,6 +67,7 @@ pipeline = VideoPipeline(
 job_store = JobStore(settings)
 job_runner = JobRunner(settings, pipeline, job_store)
 auth_service = AuthService(settings)
+idempotency_store = IdempotencyStore(settings)
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
 
@@ -94,37 +103,52 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    return _error_response(
+        status_code=exc.status_code,
+        detail=exc.detail,
+        request_id=getattr(request.state, "request_id", None),
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return _error_response(
+        status_code=422,
+        detail=exc.errors(),
+        request_id=getattr(request.state, "request_id", None),
+    )
+
+
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     started = time.perf_counter()
     request_id = request.headers.get("x-request-id") or f"req_{uuid4().hex[:12]}"
+    request.state.request_id = request_id
     if _request_body_is_too_large(request):
-        response = JSONResponse(status_code=413, content={"detail": "Request body too large"})
-        response.headers["x-request-id"] = request_id
-        return response
+        return _error_response(413, "Request body too large", request_id)
     public_paths = {"/health", "/ready", "/providers", "/openapi.json", "/auth/register", "/auth/login"}
     is_docs_path = request.url.path in {"/docs", "/redoc"} or request.url.path.startswith("/docs/")
     is_public_path = request.url.path in public_paths or is_docs_path
     if settings.app_env not in {"local", "test", "dev", "development"} and not settings.api_key and not is_public_path:
-        response = JSONResponse(
-            status_code=403,
-            content={"detail": "API_KEY must be configured for non-local environments"},
-        )
-        response.headers["x-request-id"] = request_id
-        return response
+        return _error_response(403, "API_KEY must be configured for non-local environments", request_id)
     if settings.api_key and not is_public_path:
         if request.headers.get("x-api-key") != settings.api_key:
-            response = JSONResponse(status_code=401, content={"detail": "Invalid or missing X-API-Key"})
-            response.headers["x-request-id"] = request_id
-            return response
+            return _error_response(401, "Invalid or missing X-API-Key", request_id)
     rate_limit_headers = _check_rate_limit(request)
     if rate_limit_headers is None:
-        response = JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
-        response.headers["x-request-id"] = request_id
-        response.headers["retry-after"] = "60"
-        response.headers["x-ratelimit-limit"] = str(settings.rate_limit_requests_per_minute)
-        response.headers["x-ratelimit-remaining"] = "0"
-        return response
+        return _error_response(
+            429,
+            "Rate limit exceeded",
+            request_id,
+            headers={
+                "retry-after": "60",
+                "x-ratelimit-limit": str(settings.rate_limit_requests_per_minute),
+                "x-ratelimit-remaining": "0",
+            },
+        )
     response = await call_next(request)
     for header, value in rate_limit_headers.items():
         response.headers[header] = value
@@ -140,6 +164,32 @@ async def api_key_middleware(request: Request, call_next):
             "elapsed_ms": elapsed_ms,
         },
     )
+    return response
+
+
+def _error_response(
+    status_code: int,
+    detail: object,
+    request_id: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    if isinstance(detail, str):
+        message = detail
+    elif isinstance(detail, list):
+        message = "Validation error"
+    else:
+        message = "Request failed"
+    content = {
+        "detail": jsonable_encoder(detail),
+        "error": {
+            "status_code": status_code,
+            "message": message,
+            "request_id": request_id,
+        },
+    }
+    response = JSONResponse(status_code=status_code, content=content, headers=headers)
+    if request_id:
+        response.headers["x-request-id"] = request_id
     return response
 
 
@@ -210,6 +260,71 @@ def _current_user(request: Request) -> PlatformUser | None:
         return auth_service.get_user_by_token(token)
     except (InvalidCredentialsError, SessionNotFoundError):
         raise HTTPException(status_code=401, detail="Invalid or expired bearer token") from None
+
+
+def _user_scope(user: PlatformUser | None) -> str:
+    return user.id if user else "public"
+
+
+def _idempotency_key(request: Request) -> str | None:
+    raw_key = request.headers.get("idempotency-key")
+    if not raw_key:
+        return None
+    try:
+        return idempotency_store.normalize_key(raw_key)
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+def _idempotency_record(key: str, scope: str, request_hash: str) -> IdempotencyRecord | None:
+    try:
+        return idempotency_store.get(key=key, scope=scope, request_hash=request_hash)
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+def _replay_project_record(
+    record: IdempotencyRecord | None,
+    *,
+    key: str,
+    scope: str,
+    request: Request,
+    response: Response,
+) -> dict | None:
+    if record is None or record.resource_type != "project":
+        return None
+    try:
+        project = _get_project_or_404(record.resource_id, request)
+    except HTTPException:
+        idempotency_store.delete(key=key, scope=scope)
+        return None
+    response.headers["x-idempotent-replay"] = "true"
+    return _with_file_urls(project)
+
+
+def _replay_job_record(
+    record: IdempotencyRecord | None,
+    *,
+    key: str,
+    scope: str,
+    request: Request,
+    response: Response,
+) -> dict | None:
+    if record is None or record.resource_type != "job":
+        return None
+    try:
+        job = _get_job_or_404(record.resource_id, request)
+    except HTTPException:
+        idempotency_store.delete(key=key, scope=scope)
+        return None
+    response.headers["x-idempotent-replay"] = "true"
+    return job.model_dump(mode="json")
+
+
+def _set_pagination_headers(response: Response, *, total: int, limit: int, offset: int) -> None:
+    response.headers["x-total-count"] = str(total)
+    response.headers["x-limit"] = str(limit)
+    response.headers["x-offset"] = str(offset)
 
 
 def _project_is_visible_to_user(project: Project, user: PlatformUser | None) -> bool:
@@ -368,6 +483,30 @@ def _sync_pipeline_response(project: Project) -> dict:
             },
         )
     return _with_file_urls(project)
+
+
+def _start_project_job(project_id: str, job_type: JobType, request: Request, response: Response) -> dict:
+    project = _get_project_or_404(project_id, request)
+    key = _idempotency_key(request)
+    if key:
+        scope = f"jobs:start:{project_id}:{job_type.value}:{project.owner_id or 'public'}"
+        request_hash = idempotency_store.request_hash({"project_id": project_id, "job_type": job_type.value})
+        record = _idempotency_record(key, scope, request_hash)
+        replay = _replay_job_record(record, key=key, scope=scope, request=request, response=response)
+        if replay is not None:
+            return replay
+
+    job = job_runner.start(project_id, job_type)
+    if key:
+        idempotency_store.save(
+            key=key,
+            scope=scope,
+            request_hash=request_hash,
+            resource_type="job",
+            resource_id=job.id,
+        )
+        response.headers["x-idempotent-replay"] = "false"
+    return job.model_dump(mode="json")
 
 
 @app.get("/health")
@@ -537,21 +676,46 @@ def cleanup() -> dict:
         **store.cleanup_old_projects(),
         **job_store.cleanup_old_jobs(),
         **auth_service.cleanup_expired_sessions(),
+        **idempotency_store.cleanup_old_records(),
         "retention_days": settings.cleanup_retention_days,
     }
 
 
 @app.post("/projects")
-def create_project(payload: ProjectCreate, request: Request) -> dict:
+def create_project(payload: ProjectCreate, request: Request, response: Response) -> dict:
     user = _current_user(request)
+    key = _idempotency_key(request)
+    if key:
+        scope = f"projects:create:{_user_scope(user)}"
+        request_hash = idempotency_store.request_hash(payload.model_dump(mode="json"))
+        record = _idempotency_record(key, scope, request_hash)
+        replay = _replay_project_record(record, key=key, scope=scope, request=request, response=response)
+        if replay is not None:
+            return replay
     project = store.create_project(payload, owner_id=user.id if user else None)
+    if key:
+        idempotency_store.save(
+            key=key,
+            scope=scope,
+            request_hash=request_hash,
+            resource_type="project",
+            resource_id=project.id,
+        )
+        response.headers["x-idempotent-replay"] = "false"
     return _with_file_urls(project)
 
 
 @app.get("/projects")
-def list_projects(request: Request) -> list[dict]:
+def list_projects(
+    request: Request,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
     user = _current_user(request)
-    return [_with_file_urls(project) for project in store.list_projects(owner_id=user.id if user else None)]
+    projects = store.list_projects(owner_id=user.id if user else None)
+    _set_pagination_headers(response, total=len(projects), limit=limit, offset=offset)
+    return [_with_file_urls(project) for project in projects[offset : offset + limit]]
 
 
 @app.get("/projects/{project_id}")
@@ -573,9 +737,27 @@ def delete_project(project_id: str, request: Request) -> Response:
 
 
 @app.post("/projects/{project_id}/duplicate")
-def duplicate_project(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
-    return _with_file_urls(store.duplicate_project(project_id))
+def duplicate_project(project_id: str, request: Request, response: Response) -> dict:
+    project = _get_project_or_404(project_id, request)
+    key = _idempotency_key(request)
+    if key:
+        scope = f"projects:duplicate:{project_id}:{project.owner_id or 'public'}"
+        request_hash = idempotency_store.request_hash({"project_id": project_id, "reset_outputs": True})
+        record = _idempotency_record(key, scope, request_hash)
+        replay = _replay_project_record(record, key=key, scope=scope, request=request, response=response)
+        if replay is not None:
+            return replay
+    duplicate = store.duplicate_project(project_id)
+    if key:
+        idempotency_store.save(
+            key=key,
+            scope=scope,
+            request_hash=request_hash,
+            resource_type="project",
+            resource_id=duplicate.id,
+        )
+        response.headers["x-idempotent-replay"] = "false"
+    return _with_file_urls(duplicate)
 
 
 @app.post("/projects/{project_id}/generate-script")
@@ -621,15 +803,13 @@ def generate_all(project_id: str, request: Request) -> dict:
 
 
 @app.post("/projects/{project_id}/jobs/{job_type}")
-def start_project_job(project_id: str, job_type: JobType, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
-    return job_runner.start(project_id, job_type).model_dump(mode="json")
+def start_project_job(project_id: str, job_type: JobType, request: Request, response: Response) -> dict:
+    return _start_project_job(project_id, job_type, request, response)
 
 
 @app.post("/projects/{project_id}/generate-all-queued")
-def generate_all_queued(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
-    return job_runner.start(project_id, JobType.generate_all).model_dump(mode="json")
+def generate_all_queued(project_id: str, request: Request, response: Response) -> dict:
+    return _start_project_job(project_id, JobType.generate_all, request, response)
 
 
 @app.get("/jobs/{job_id}")
@@ -664,14 +844,30 @@ def retry_job(job_id: str, request: Request) -> dict:
 
 
 @app.get("/jobs/{job_id}/events")
-def get_job_events(job_id: str, request: Request) -> list[dict]:
-    return _job_or_404(job_id, request).get("events", [])
+def get_job_events(
+    job_id: str,
+    request: Request,
+    response: Response,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    events = _job_or_404(job_id, request).get("events", [])
+    _set_pagination_headers(response, total=len(events), limit=limit, offset=offset)
+    return events[offset : offset + limit]
 
 
 @app.get("/projects/{project_id}/jobs")
-def list_project_jobs(project_id: str, request: Request) -> list[dict]:
+def list_project_jobs(
+    project_id: str,
+    request: Request,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
     _get_project_or_404(project_id, request)
-    return [job.model_dump(mode="json") for job in job_store.list_for_project(project_id)]
+    jobs = job_store.list_for_project(project_id)
+    _set_pagination_headers(response, total=len(jobs), limit=limit, offset=offset)
+    return [job.model_dump(mode="json") for job in jobs[offset : offset + limit]]
 
 
 @app.patch("/projects/{project_id}/scenes/{scene_id}")

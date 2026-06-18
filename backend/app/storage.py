@@ -244,7 +244,7 @@ class ProjectStore:
             if owner_id is not None and project.owner_id != owner_id:
                 continue
             projects.append(project)
-        return projects
+        return sorted(projects, key=lambda item: (item.created_at, item.id), reverse=True)
 
     def cleanup_old_projects(self, retention_days: int | None = None) -> dict[str, int]:
         retention = retention_days if retention_days is not None else self.settings.cleanup_retention_days
