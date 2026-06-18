@@ -802,6 +802,35 @@ def test_api_project_manifest_reports_readiness_and_missing_artifacts(tmp_path, 
     assert payload["artifacts"][0]["exists"] is False
 
 
+def test_maintenance_backup_and_restore_preview(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post("/projects", json={"topic": "Backup smoke test project"})
+    assert created.status_code == 200
+    project_id = created.json()["id"]
+
+    backup = client.post("/maintenance/backups")
+    assert backup.status_code == 200
+    backup_id = backup.json()["id"]
+    assert backup.json()["files_added"] >= 1
+
+    backups = client.get("/maintenance/backups")
+    download = client.get(f"/maintenance/backups/{backup_id}")
+    restored = client.post(f"/maintenance/backups/{backup_id}/restore-preview")
+
+    assert backups.status_code == 200
+    assert backups.json()[0]["id"] == backup_id
+    assert download.status_code == 200
+    assert restored.status_code == 200
+    restore_path = Path(restored.json()["restore_path"])
+    assert (restore_path / project_id / "project.json").is_file()
+
+
 def test_api_rate_limit_returns_429(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")

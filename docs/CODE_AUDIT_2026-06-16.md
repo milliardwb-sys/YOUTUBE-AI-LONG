@@ -19,7 +19,8 @@
 - добавлены hardening-механизмы: API key gate, rate limit, body size limit, SSRF/path traversal checks, render timeout, dependency/secrets checks;
 - добавлены pagination headers и Idempotency-Key для критичных POST endpoints;
 - добавлен file-backed audit log для auth/project/job/scene действий с пользовательской изоляцией;
-- добавлен MVP usage/limits/cost tracking слой и secure token persistence в мобильном клиенте через Expo SecureStore.
+- добавлен MVP usage/limits/cost tracking слой и secure token persistence в мобильном клиенте через Expo SecureStore;
+- добавлен local backup snapshot и restore-preview flow для file-backed данных.
 
 Это уже хорошая база для demo/MVP и внутреннего прототипа. До public SaaS еще далеко: нет PostgreSQL, durable queue, object storage, ролей, организаций, Stripe/subscriptions, production observability, managed auth/OIDC, полноценного web/admin UI и юридических consent/data flows.
 
@@ -39,7 +40,7 @@
 
 - FastAPI backend: routes, middleware, auth, project/job/file access.
 - Pydantic models: project, scene, source, result, job, auth DTO.
-- Local storage: JSON project store, job store, auth store, idempotency store, audit log store, usage ledger.
+- Local storage: JSON project store, job store, auth store, idempotency store, audit log store, usage ledger, backup snapshots.
 - Pipeline: script, source collection, visual slides, voice, avatar placeholder, render/export.
 - Mobile Expo client: API client, auth flow, project list, project controls, scene editor.
 - Security controls: API key, bearer token, owner checks, path validation, URL validation, rate limit.
@@ -63,6 +64,7 @@
 - file endpoint with path and owner checks.
 - manifest/status/result endpoints.
 - usage endpoint: `GET /usage/me`;
+- maintenance backup endpoints: create/list/download/restore-preview;
 - cleanup endpoint для старых projects/jobs/sessions/idempotency/audit records.
 
 ### API contracts
@@ -148,6 +150,27 @@
 - нет тарифных планов и промокодов;
 - cost tracking оценочный, не сверяется с реальными provider invoices;
 - usage ledger пока хранится в локальных JSON-файлах.
+
+### Backup and restore
+
+Реализовано:
+
+- file-backed `BackupService`;
+- `POST /maintenance/backups` для ZIP-снимка `DATA_DIR`;
+- `GET /maintenance/backups` для списка backup snapshots;
+- `GET /maintenance/backups/{backup_id}` для скачивания ZIP;
+- `POST /maintenance/backups/{backup_id}/restore-preview`;
+- backup исключает внутренние `_backups` и `_restores`;
+- restore-preview распаковывает backup в отдельную директорию и не перезаписывает live data;
+- тест на backup/download/restore-preview flow.
+
+Ограничения:
+
+- restore пока preview-only;
+- нет шифрования backup;
+- нет remote backup storage;
+- нет расписания backup и retention policy для backup snapshots;
+- нет production restore approval workflow.
 
 ### Генерация видео
 
@@ -252,7 +275,7 @@
 - нет deployment manifests для cloud;
 - нет managed database;
 - нет object storage;
-- нет backup/restore;
+- backup/restore есть только как local snapshot + restore-preview, без remote storage/automation;
 - нет monitoring stack;
 - нет centralized logs/traces.
 
@@ -291,7 +314,7 @@
 5. Нет Stripe billing/subscriptions; usage limits есть только как MVP foundation.
 6. Audit log есть только file-backed MVP, без immutable storage/admin-wide browser.
 7. Нет observability и alerting.
-8. Нет backup/restore процесса.
+8. Backup/restore есть только как MVP local snapshot/restore-preview.
 9. Нет legal consent для voice/avatar.
 10. Нет managed mobile session/device controls поверх SecureStore.
 

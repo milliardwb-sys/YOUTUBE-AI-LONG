@@ -113,6 +113,21 @@ USAGE_RENDER_COST_CENTS_PER_MINUTE=2
 
 `0` disables a limit. Project creation and project duplication return `402` with `project_quota_exceeded` when the project quota is exhausted. Starting a new job returns `402` with `active_job_quota_exceeded` when the active job quota is exhausted. Existing active jobs for the same project are reused instead of counted as new jobs.
 
+## Backups and restore preview
+
+Local file-backed deployments can create data snapshots through maintenance endpoints:
+
+```text
+POST /maintenance/backups
+GET /maintenance/backups
+GET /maintenance/backups/{backup_id}
+POST /maintenance/backups/{backup_id}/restore-preview
+```
+
+`POST /maintenance/backups` creates a ZIP snapshot of `DATA_DIR`, excluding internal `_backups` and `_restores` folders. `GET /maintenance/backups/{backup_id}` downloads the ZIP.
+
+Restore is intentionally a preview operation in the MVP: `restore-preview` extracts the backup into `DATA_DIR/_restores/<restore_id>` and does not overwrite live project/job/auth data. This gives a safe restore drill before a future production restore flow with explicit operator approval.
+
 ## Rate limiting
 
 Встроенный in-memory limiter включается через:

@@ -36,6 +36,7 @@ from app.services.auth_service import (
     UserAlreadyExistsError,
 )
 from app.services.audit_log_service import AuditLogService
+from app.services.backup_service import BackupNotFoundError, BackupService, InvalidBackupError
 from app.services.compliance_service import ComplianceService
 from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
 from app.services.idempotency_service import (
@@ -73,6 +74,7 @@ auth_service = AuthService(settings)
 idempotency_store = IdempotencyStore(settings)
 audit_log = AuditLogService(settings)
 usage_service = UsageService(settings)
+backup_service = BackupService(settings)
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
 
@@ -823,6 +825,36 @@ def cleanup() -> dict:
         **usage_service.cleanup_old_events(),
         "retention_days": settings.cleanup_retention_days,
     }
+
+
+@app.post("/maintenance/backups")
+def create_backup() -> dict:
+    return backup_service.create_backup()
+
+
+@app.get("/maintenance/backups")
+def list_backups() -> list[dict]:
+    return backup_service.list_backups()
+
+
+@app.get("/maintenance/backups/{backup_id}")
+def download_backup(backup_id: str) -> FileResponse:
+    try:
+        return FileResponse(backup_service.backup_path(backup_id), media_type="application/zip", filename=backup_id)
+    except InvalidBackupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except BackupNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found") from None
+
+
+@app.post("/maintenance/backups/{backup_id}/restore-preview")
+def restore_backup_preview(backup_id: str) -> dict:
+    try:
+        return backup_service.restore_preview(backup_id)
+    except InvalidBackupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except BackupNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found") from None
 
 
 @app.get("/audit/events")
