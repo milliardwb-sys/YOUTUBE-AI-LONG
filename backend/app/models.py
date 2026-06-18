@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.utils.security import UnsafeUrlError, validate_source_url
+from app.utils.security import UnsafeUrlError, validate_organization_id, validate_source_url, validate_user_id
 
 
 class ProjectStatus(str, Enum):
@@ -79,6 +79,13 @@ class JobType(str, Enum):
     generate_all = "generate_all"
 
 
+class OrganizationRole(str, Enum):
+    owner = "owner"
+    admin = "admin"
+    editor = "editor"
+    viewer = "viewer"
+
+
 class UserCreate(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=8, max_length=256)
@@ -143,6 +150,82 @@ class UserSession(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class OrganizationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class OrganizationMemberCreate(BaseModel):
+    email: str | None = Field(default=None, min_length=3, max_length=254)
+    user_id: str | None = None
+    role: OrganizationRole = OrganizationRole.editor
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip().lower()
+        if "@" not in clean or clean.startswith("@") or clean.endswith("@"):
+            raise ValueError("email must be a valid email address")
+        return clean
+
+    @field_validator("user_id")
+    @classmethod
+    def normalize_user_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_user_id(value.strip())
+
+    @model_validator(mode="after")
+    def require_target_user(self) -> "OrganizationMemberCreate":
+        if not self.email and not self.user_id:
+            raise ValueError("email or user_id is required")
+        return self
+
+
+class OrganizationMemberUpdate(BaseModel):
+    role: OrganizationRole
+
+
+class Organization(BaseModel):
+    id: str = Field(default_factory=lambda: f"org_{uuid4().hex[:12]}")
+    name: str
+    created_by_user_id: str
+    disabled: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def touch(self) -> None:
+        self.updated_at = datetime.now(timezone.utc)
+
+
+class OrganizationMember(BaseModel):
+    organization_id: str
+    user_id: str
+    email: str | None = None
+    role: OrganizationRole
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("organization_id")
+    @classmethod
+    def normalize_organization_id(cls, value: str) -> str:
+        return validate_organization_id(value.strip())
+
+    @field_validator("user_id")
+    @classmethod
+    def validate_member_user_id(cls, value: str) -> str:
+        return validate_user_id(value.strip())
+
+    def touch(self) -> None:
+        self.updated_at = datetime.now(timezone.utc)
+
+
 class SourceCandidate(BaseModel):
     id: str = Field(default_factory=lambda: f"source_{uuid4().hex[:8]}")
     name: str
@@ -163,6 +246,7 @@ class SourceCandidate(BaseModel):
 
 class ProjectCreate(BaseModel):
     topic: str = Field(min_length=5, max_length=240)
+    organization_id: str | None = None
     duration_minutes: int = Field(default=3, ge=1, le=10)
     style: VideoStyle = VideoStyle.expert_review
     language: Literal["ru", "en"] = "ru"
@@ -183,6 +267,13 @@ class ProjectCreate(BaseModel):
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("organization_id")
+    @classmethod
+    def normalize_organization_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_organization_id(value.strip())
 
     @field_validator("source_urls")
     @classmethod

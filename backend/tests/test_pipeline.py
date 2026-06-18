@@ -607,6 +607,113 @@ def test_user_auth_isolates_projects_jobs_and_files(tmp_path, monkeypatch):
     assert client.get(f"/jobs/{job.id}", headers=bob_headers).status_code == 404
 
 
+def test_registration_creates_personal_organization(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "workspace@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    organizations = client.get("/organizations", headers=headers)
+    org_id = organizations.json()[0]["id"]
+    created = client.post("/projects", json={"topic": "Workspace default project"}, headers=headers)
+    members = client.get(f"/organizations/{org_id}/members", headers=headers)
+
+    assert organizations.status_code == 200
+    assert organizations.json()[0]["role"] == "owner"
+    assert created.status_code == 200
+    assert created.json()["organization_id"] == org_id
+    assert members.status_code == 200
+    assert members.json()[0]["role"] == "owner"
+
+
+def test_organization_rbac_controls_project_access(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("RUN_JOBS_INLINE", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    alice_token = client.post(
+        "/auth/register",
+        json={"email": "org-alice@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    bob_token = client.post(
+        "/auth/register",
+        json={"email": "org-bob@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    viewer_token = client.post(
+        "/auth/register",
+        json={"email": "org-viewer@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    alice_headers = {"Authorization": f"Bearer {alice_token}"}
+    bob_headers = {"Authorization": f"Bearer {bob_token}"}
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+
+    org_id = client.get("/organizations", headers=alice_headers).json()[0]["id"]
+    bob_member = client.post(
+        f"/organizations/{org_id}/members",
+        json={"email": "org-bob@example.com", "role": "editor"},
+        headers=alice_headers,
+    )
+    viewer_member = client.post(
+        f"/organizations/{org_id}/members",
+        json={"email": "org-viewer@example.com", "role": "viewer"},
+        headers=alice_headers,
+    )
+    editor_cannot_invite = client.post(
+        f"/organizations/{org_id}/members",
+        json={"email": "org-viewer@example.com", "role": "viewer"},
+        headers=bob_headers,
+    )
+
+    created = client.post(
+        "/projects",
+        json={"topic": "Shared organization video project", "organization_id": org_id},
+        headers=alice_headers,
+    )
+    project_id = created.json()["id"]
+    bob_projects = client.get("/projects", headers=bob_headers)
+    bob_update = client.patch(
+        f"/projects/{project_id}",
+        json={"topic": "Shared organization video project updated"},
+        headers=bob_headers,
+    )
+    viewer_read = client.get(f"/projects/{project_id}", headers=viewer_headers)
+    viewer_update = client.patch(
+        f"/projects/{project_id}",
+        json={"topic": "Viewer should not update"},
+        headers=viewer_headers,
+    )
+    viewer_job = client.post(f"/projects/{project_id}/jobs/generate_script", headers=viewer_headers)
+    bob_delete = client.delete(f"/projects/{project_id}", headers=bob_headers)
+    alice_delete = client.delete(f"/projects/{project_id}", headers=alice_headers)
+
+    assert bob_member.status_code == 200
+    assert viewer_member.status_code == 200
+    assert editor_cannot_invite.status_code == 403
+    assert created.status_code == 200
+    assert created.json()["organization_id"] == org_id
+    assert [project["id"] for project in bob_projects.json()] == [project_id]
+    assert bob_update.status_code == 200
+    assert viewer_read.status_code == 200
+    assert viewer_update.status_code == 403
+    assert viewer_job.status_code == 403
+    assert bob_delete.status_code == 403
+    assert alice_delete.status_code == 204
+
+
 def test_audit_log_records_user_project_and_job_actions(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")

@@ -12,6 +12,8 @@ PROJECT_ID_RE = re.compile(r"^project_[a-f0-9]{12}$")
 JOB_ID_RE = re.compile(r"^job_[a-f0-9]{12}$")
 SCENE_ID_RE = re.compile(r"^scene_[a-f0-9]{8}$")
 SOURCE_ID_RE = re.compile(r"^source_[a-f0-9]{8}$")
+USER_ID_RE = re.compile(r"^user_[a-f0-9]{12}$")
+ORGANIZATION_ID_RE = re.compile(r"^org_[a-f0-9]{12}$")
 
 
 class InvalidIdentifierError(ValueError):
@@ -47,6 +49,18 @@ def validate_scene_id(value: str) -> str:
 def validate_source_id(value: str) -> str:
     if not SOURCE_ID_RE.fullmatch(value):
         raise InvalidIdentifierError("Invalid source id")
+    return value
+
+
+def validate_user_id(value: str) -> str:
+    if not USER_ID_RE.fullmatch(value):
+        raise InvalidIdentifierError("Invalid user id")
+    return value
+
+
+def validate_organization_id(value: str) -> str:
+    if not ORGANIZATION_ID_RE.fullmatch(value):
+        raise InvalidIdentifierError("Invalid organization id")
     return value
 
 

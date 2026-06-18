@@ -16,6 +16,12 @@ from app.config import get_settings
 from app.models import (
     JobStatus,
     JobType,
+    Organization,
+    OrganizationCreate,
+    OrganizationMember,
+    OrganizationMemberCreate,
+    OrganizationMemberUpdate,
+    OrganizationRole,
     PlatformUser,
     Project,
     ProjectCreate,
@@ -45,6 +51,12 @@ from app.services.idempotency_service import (
     IdempotencyStore,
     InvalidIdempotencyKeyError,
 )
+from app.services.organization_service import (
+    LastOrganizationOwnerError,
+    OrganizationMemberNotFoundError,
+    OrganizationNotFoundError,
+    OrganizationService,
+)
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
 from app.services.usage_service import UsageService
@@ -53,7 +65,7 @@ from app.services.visual_service import VisualService
 from app.services.voice_service import VoiceService
 from app.storage import InvalidSceneOrderError, ProjectNotFoundError, ProjectStore, SceneNotFoundError
 from app.models import ProjectStatus
-from app.utils.security import InvalidIdentifierError, UnsafePathError, ensure_within_directory
+from app.utils.security import InvalidIdentifierError, UnsafePathError, ensure_within_directory, validate_organization_id, validate_user_id
 
 settings = get_settings()
 logger = logging.getLogger("ai_video_studio.api")
@@ -75,6 +87,7 @@ idempotency_store = IdempotencyStore(settings)
 audit_log = AuditLogService(settings)
 usage_service = UsageService(settings)
 backup_service = BackupService(settings)
+organization_service = OrganizationService(settings)
 app_started_at = time.time()
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
@@ -383,6 +396,90 @@ def _project_owner_scope(user: PlatformUser | None) -> str | None:
     return user.id if user else None
 
 
+def _role_allows(role: OrganizationRole | None, permission: str) -> bool:
+    if role is None:
+        return False
+    if permission == "read":
+        return role in {
+            OrganizationRole.owner,
+            OrganizationRole.admin,
+            OrganizationRole.editor,
+            OrganizationRole.viewer,
+        }
+    if permission == "write":
+        return role in {OrganizationRole.owner, OrganizationRole.admin, OrganizationRole.editor}
+    if permission == "admin":
+        return role in {OrganizationRole.owner, OrganizationRole.admin}
+    if permission == "owner":
+        return role == OrganizationRole.owner
+    return False
+
+
+def _require_user_auth(request: Request) -> PlatformUser:
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="User auth is disabled")
+    user = _current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    return user
+
+
+def _organization_role_for_user(organization_id: str | None, user: PlatformUser | None) -> OrganizationRole | None:
+    return organization_service.role_for_user(organization_id, user.id if user else None)
+
+
+def _require_organization_permission(
+    organization_id: str,
+    user: PlatformUser | None,
+    permission: str,
+) -> Organization:
+    try:
+        validate_organization_id(organization_id)
+        organization = organization_service.get(organization_id)
+    except (InvalidIdentifierError, OrganizationNotFoundError):
+        raise HTTPException(status_code=404, detail="Organization not found") from None
+    role = _organization_role_for_user(organization_id, user)
+    if _role_allows(role, permission):
+        return organization
+    if role is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    raise HTTPException(status_code=403, detail="Insufficient organization role")
+
+
+def _organization_payload(organization: Organization, user: PlatformUser) -> dict:
+    member = organization_service.get_member(organization.id, user.id)
+    payload = organization.model_dump(mode="json")
+    payload["role"] = member.role.value
+    payload["member_count"] = organization_service.member_count(organization.id)
+    return payload
+
+
+def _member_payload(member: OrganizationMember) -> dict:
+    return member.model_dump(mode="json")
+
+
+def _resolve_member_target(payload: OrganizationMemberCreate) -> PlatformUser:
+    try:
+        if payload.user_id:
+            return auth_service.get_user(payload.user_id)
+        if payload.email:
+            user = auth_service.find_user_by_email(payload.email)
+            if user is None:
+                raise InvalidCredentialsError("User not found")
+            return user
+    except (InvalidCredentialsError, InvalidIdentifierError):
+        raise HTTPException(status_code=404, detail="User not found") from None
+    raise HTTPException(status_code=422, detail="email or user_id is required")
+
+
+def _default_project_organization_id(user: PlatformUser | None, payload: ProjectCreate) -> str | None:
+    if not _auth_enabled() or user is None:
+        return payload.organization_id
+    organization_id = payload.organization_id or organization_service.ensure_personal_organization(user).id
+    _require_organization_permission(organization_id, user, "write")
+    return organization_id
+
+
 def _request_id(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
@@ -485,29 +582,51 @@ def _estimate_job_cost_cents(project: Project, job_type: JobType) -> int:
     return 0
 
 
-def _project_is_visible_to_user(project: Project, user: PlatformUser | None) -> bool:
+def _project_permission_allowed(project: Project, user: PlatformUser | None, permission: str = "read") -> bool:
     if not _auth_enabled():
         return True
     if user is None:
         return False
+    if project.organization_id:
+        role = _organization_role_for_user(project.organization_id, user)
+        if _role_allows(role, permission):
+            return True
+        return project.owner_id == user.id and permission in {"read", "write"}
     return project.owner_id == user.id
 
 
-def _job_is_visible_to_user(job: ProjectJob, user: PlatformUser | None) -> bool:
+def _require_project_permission(project: Project, user: PlatformUser | None, permission: str = "read") -> None:
+    if _project_permission_allowed(project, user, permission):
+        return
+    if _project_permission_allowed(project, user, "read"):
+        raise HTTPException(status_code=403, detail="Insufficient project role")
+    raise HTTPException(status_code=404, detail="Project not found")
+
+
+def _visible_projects_for_user(user: PlatformUser | None) -> list[Project]:
+    if not _auth_enabled():
+        return store.list_projects()
+    if user is None:
+        return []
+    projects = [project for project in store.list_projects() if _project_permission_allowed(project, user, "read")]
+    return sorted(projects, key=lambda item: (item.created_at, item.id), reverse=True)
+
+
+def _job_is_visible_to_user(job: ProjectJob, user: PlatformUser | None, permission: str = "read") -> bool:
     if not _auth_enabled():
         return True
     if user is None:
         return False
-    if job.owner_id is not None:
-        return job.owner_id == user.id
     try:
         project = store.get(job.project_id)
     except Exception:
-        return False
-    return project.owner_id == user.id
+        if job.organization_id:
+            return _role_allows(_organization_role_for_user(job.organization_id, user), permission)
+        return job.owner_id == user.id
+    return _project_permission_allowed(project, user, permission)
 
 
-def _get_project_or_404(project_id: str, request: Request | None = None) -> Project:
+def _get_project_or_404(project_id: str, request: Request | None = None, permission: str = "read") -> Project:
     try:
         project = store.get(project_id)
     except (InvalidIdentifierError, UnsafePathError):
@@ -515,8 +634,7 @@ def _get_project_or_404(project_id: str, request: Request | None = None) -> Proj
     except ProjectNotFoundError:
         raise HTTPException(status_code=404, detail="Project not found") from None
     user = _current_user(request) if request is not None else None
-    if not _project_is_visible_to_user(project, user):
-        raise HTTPException(status_code=404, detail="Project not found")
+    _require_project_permission(project, user, permission)
     return project
 
 
@@ -609,7 +727,7 @@ def _project_manifest(project: Project) -> dict:
     }
 
 
-def _get_job_or_404(job_id: str, request: Request | None = None) -> ProjectJob:
+def _get_job_or_404(job_id: str, request: Request | None = None, permission: str = "read") -> ProjectJob:
     try:
         job = job_store.get(job_id)
     except (InvalidIdentifierError, UnsafePathError):
@@ -617,13 +735,15 @@ def _get_job_or_404(job_id: str, request: Request | None = None) -> ProjectJob:
     except JobNotFoundError:
         raise HTTPException(status_code=404, detail="Job not found") from None
     user = _current_user(request) if request is not None else None
-    if not _job_is_visible_to_user(job, user):
+    if not _job_is_visible_to_user(job, user, permission):
+        if _job_is_visible_to_user(job, user, "read"):
+            raise HTTPException(status_code=403, detail="Insufficient project role")
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
 
-def _job_or_404(job_id: str, request: Request | None = None) -> dict:
-    return _get_job_or_404(job_id, request).model_dump(mode="json")
+def _job_or_404(job_id: str, request: Request | None = None, permission: str = "read") -> dict:
+    return _get_job_or_404(job_id, request, permission).model_dump(mode="json")
 
 
 def _sync_pipeline_response(project: Project) -> dict:
@@ -644,11 +764,12 @@ def _sync_pipeline_response(project: Project) -> dict:
 
 
 def _start_project_job(project_id: str, job_type: JobType, request: Request, response: Response) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
     user = _current_user(request)
     key = _idempotency_key(request)
     if key:
-        scope = f"jobs:start:{project_id}:{job_type.value}:{project.owner_id or 'public'}"
+        project_scope = project.organization_id or project.owner_id or "public"
+        scope = f"jobs:start:{project_id}:{job_type.value}:{_user_scope(user)}:{project_scope}"
         request_hash = idempotency_store.request_hash({"project_id": project_id, "job_type": job_type.value})
         record = _idempotency_record(key, scope, request_hash)
         replay = _replay_job_record(record, key=key, scope=scope, request=request, response=response)
@@ -657,7 +778,7 @@ def _start_project_job(project_id: str, job_type: JobType, request: Request, res
 
     if job_store.active_for_project(project_id) is None:
         _enforce_active_job_quota(user)
-    job = job_runner.start(project_id, job_type)
+    job = job_runner.start(project_id, job_type, owner_id=user.id if user else None)
     if key:
         idempotency_store.save(
             key=key,
@@ -679,7 +800,7 @@ def _start_project_job(project_id: str, job_type: JobType, request: Request, res
     _audit(
         request,
         "job.start",
-        actor_id=project.owner_id,
+        actor_id=_actor_id(user),
         resource_type="job",
         resource_id=job.id,
         metadata={"project_id": project_id, "job_type": job_type.value},
@@ -787,6 +908,7 @@ def register_user(payload: UserCreate, request: Request) -> dict:
         raise HTTPException(status_code=404, detail="User auth is disabled")
     try:
         token = auth_service.register(payload)
+        organization_service.ensure_personal_organization(auth_service.get_user(token.user.id))
         _audit(request, "auth.register", actor_id=token.user.id, resource_type="user", resource_id=token.user.id)
         return token.model_dump(mode="json")
     except UserAlreadyExistsError as exc:
@@ -823,6 +945,121 @@ def logout_user(request: Request) -> dict:
     if user:
         _audit(request, "auth.logout", actor_id=user.id, resource_type="user", resource_id=user.id)
     return {"revoked": revoked}
+
+
+@app.get("/organizations")
+def list_organizations(request: Request) -> list[dict]:
+    user = _require_user_auth(request)
+    organization_service.ensure_personal_organization(user)
+    return [_organization_payload(organization, user) for organization in organization_service.list_for_user(user.id)]
+
+
+@app.post("/organizations")
+def create_organization(payload: OrganizationCreate, request: Request) -> dict:
+    user = _require_user_auth(request)
+    organization = organization_service.create(payload, user)
+    _audit(
+        request,
+        "organization.create",
+        actor_id=user.id,
+        resource_type="organization",
+        resource_id=organization.id,
+        metadata={"name": organization.name},
+    )
+    return _organization_payload(organization, user)
+
+
+@app.get("/organizations/{organization_id}")
+def get_organization(organization_id: str, request: Request) -> dict:
+    user = _require_user_auth(request)
+    organization = _require_organization_permission(organization_id, user, "read")
+    return _organization_payload(organization, user)
+
+
+@app.get("/organizations/{organization_id}/members")
+def list_organization_members(organization_id: str, request: Request) -> list[dict]:
+    user = _require_user_auth(request)
+    _require_organization_permission(organization_id, user, "read")
+    return [_member_payload(member) for member in organization_service.list_members(organization_id)]
+
+
+@app.post("/organizations/{organization_id}/members")
+def add_organization_member(organization_id: str, payload: OrganizationMemberCreate, request: Request) -> dict:
+    user = _require_user_auth(request)
+    _require_organization_permission(organization_id, user, "admin")
+    if payload.role == OrganizationRole.owner and not _role_allows(_organization_role_for_user(organization_id, user), "owner"):
+        raise HTTPException(status_code=403, detail="Only organization owners can add owners")
+    target = _resolve_member_target(payload)
+    member = organization_service.add_member(organization_id, target, payload.role)
+    _audit(
+        request,
+        "organization.member.add",
+        actor_id=user.id,
+        resource_type="organization",
+        resource_id=organization_id,
+        metadata={"target_user_id": target.id, "role": member.role.value},
+    )
+    return _member_payload(member)
+
+
+@app.patch("/organizations/{organization_id}/members/{user_id}")
+def update_organization_member(
+    organization_id: str,
+    user_id: str,
+    payload: OrganizationMemberUpdate,
+    request: Request,
+) -> dict:
+    user = _require_user_auth(request)
+    _require_organization_permission(organization_id, user, "admin")
+    try:
+        validate_user_id(user_id)
+        current_member = organization_service.get_member(organization_id, user_id)
+    except (InvalidIdentifierError, OrganizationMemberNotFoundError):
+        raise HTTPException(status_code=404, detail="Organization member not found") from None
+    if (current_member.role == OrganizationRole.owner or payload.role == OrganizationRole.owner) and not _role_allows(
+        _organization_role_for_user(organization_id, user),
+        "owner",
+    ):
+        raise HTTPException(status_code=403, detail="Only organization owners can change owner membership")
+    try:
+        member = organization_service.update_member_role(organization_id, user_id, payload.role)
+    except LastOrganizationOwnerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    _audit(
+        request,
+        "organization.member.update",
+        actor_id=user.id,
+        resource_type="organization",
+        resource_id=organization_id,
+        metadata={"target_user_id": user_id, "role": member.role.value},
+    )
+    return _member_payload(member)
+
+
+@app.delete("/organizations/{organization_id}/members/{user_id}", status_code=204)
+def delete_organization_member(organization_id: str, user_id: str, request: Request) -> Response:
+    user = _require_user_auth(request)
+    _require_organization_permission(organization_id, user, "admin")
+    try:
+        validate_user_id(user_id)
+        current_member = organization_service.get_member(organization_id, user_id)
+    except (InvalidIdentifierError, OrganizationMemberNotFoundError):
+        raise HTTPException(status_code=404, detail="Organization member not found") from None
+    if current_member.role == OrganizationRole.owner and not _role_allows(_organization_role_for_user(organization_id, user), "owner"):
+        raise HTTPException(status_code=403, detail="Only organization owners can remove owners")
+    try:
+        organization_service.remove_member(organization_id, user_id)
+    except LastOrganizationOwnerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    _audit(
+        request,
+        "organization.member.remove",
+        actor_id=user.id,
+        resource_type="organization",
+        resource_id=organization_id,
+        metadata={"target_user_id": user_id},
+    )
+    return Response(status_code=204)
 
 
 @app.get("/providers")
@@ -918,6 +1155,20 @@ def list_audit_events(
 ) -> list[dict]:
     user = _current_user(request)
     actor_id = user.id if _auth_enabled() and user else None
+    if _auth_enabled() and user and resource_type and resource_id:
+        try:
+            if resource_type == "project":
+                _get_project_or_404(resource_id, request)
+                actor_id = None
+            elif resource_type == "job":
+                _get_job_or_404(resource_id, request)
+                actor_id = None
+            elif resource_type == "organization":
+                _require_organization_permission(resource_id, user, "read")
+                actor_id = None
+        except HTTPException:
+            _set_pagination_headers(response, total=0, limit=limit, offset=offset)
+            return []
     events = audit_log.list_events(actor_id=actor_id, resource_type=resource_type, resource_id=resource_id)
     _set_pagination_headers(response, total=len(events), limit=limit, offset=offset)
     return [
@@ -963,7 +1214,8 @@ def create_project(payload: ProjectCreate, request: Request, response: Response)
         if replay is not None:
             return replay
     _enforce_project_quota(user)
-    project = store.create_project(payload, owner_id=user.id if user else None)
+    organization_id = _default_project_organization_id(user, payload)
+    project = store.create_project(payload, owner_id=user.id if user else None, organization_id=organization_id)
     if key:
         idempotency_store.save(
             key=key,
@@ -979,7 +1231,7 @@ def create_project(payload: ProjectCreate, request: Request, response: Response)
         actor_id=user.id if user else None,
         resource_type="project",
         resource_id=project.id,
-        metadata={"topic": project.topic},
+        metadata={"topic": project.topic, "organization_id": project.organization_id},
     )
     usage_service.record(
         "project.create",
@@ -988,7 +1240,7 @@ def create_project(payload: ProjectCreate, request: Request, response: Response)
         resource_id=project.id,
         units=1,
         estimated_cost_cents=0,
-        metadata={"topic": project.topic},
+        metadata={"topic": project.topic, "organization_id": project.organization_id},
     )
     return _with_file_urls(project)
 
@@ -1001,7 +1253,7 @@ def list_projects(
     offset: int = Query(default=0, ge=0),
 ) -> list[dict]:
     user = _current_user(request)
-    projects = store.list_projects(owner_id=user.id if user else None)
+    projects = _visible_projects_for_user(user)
     _set_pagination_headers(response, total=len(projects), limit=limit, offset=offset)
     return [_with_file_urls(project) for project in projects[offset : offset + limit]]
 
@@ -1013,12 +1265,13 @@ def get_project(project_id: str, request: Request) -> dict:
 
 @app.patch("/projects/{project_id}")
 def update_project(project_id: str, payload: ProjectUpdate, request: Request) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
+    user = _current_user(request)
     updated = store.update_project(project_id, payload)
     _audit(
         request,
         "project.update",
-        actor_id=project.owner_id,
+        actor_id=_actor_id(user),
         resource_type="project",
         resource_id=project_id,
         metadata={"fields": sorted(payload.model_dump(exclude_unset=True).keys())},
@@ -1028,26 +1281,28 @@ def update_project(project_id: str, payload: ProjectUpdate, request: Request) ->
 
 @app.delete("/projects/{project_id}", status_code=204)
 def delete_project(project_id: str, request: Request) -> Response:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="admin")
+    user = _current_user(request)
     store.delete_project(project_id)
-    _audit(request, "project.delete", actor_id=project.owner_id, resource_type="project", resource_id=project_id)
+    _audit(request, "project.delete", actor_id=_actor_id(user), resource_type="project", resource_id=project_id)
     return Response(status_code=204)
 
 
 @app.post("/projects/{project_id}/duplicate")
 def duplicate_project(project_id: str, request: Request, response: Response) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
     user = _current_user(request)
     key = _idempotency_key(request)
     if key:
-        scope = f"projects:duplicate:{project_id}:{project.owner_id or 'public'}"
+        project_scope = project.organization_id or project.owner_id or "public"
+        scope = f"projects:duplicate:{project_id}:{_user_scope(user)}:{project_scope}"
         request_hash = idempotency_store.request_hash({"project_id": project_id, "reset_outputs": True})
         record = _idempotency_record(key, scope, request_hash)
         replay = _replay_project_record(record, key=key, scope=scope, request=request, response=response)
         if replay is not None:
             return replay
     _enforce_project_quota(user)
-    duplicate = store.duplicate_project(project_id)
+    duplicate = store.duplicate_project(project_id, owner_id=user.id if user else project.owner_id, organization_id=project.organization_id)
     if key:
         idempotency_store.save(
             key=key,
@@ -1060,10 +1315,10 @@ def duplicate_project(project_id: str, request: Request, response: Response) -> 
     _audit(
         request,
         "project.duplicate",
-        actor_id=project.owner_id,
+        actor_id=_actor_id(user),
         resource_type="project",
         resource_id=duplicate.id,
-        metadata={"source_project_id": project_id},
+        metadata={"source_project_id": project_id, "organization_id": duplicate.organization_id},
     )
     usage_service.record(
         "project.duplicate",
@@ -1072,50 +1327,50 @@ def duplicate_project(project_id: str, request: Request, response: Response) -> 
         resource_id=duplicate.id,
         units=1,
         estimated_cost_cents=0,
-        metadata={"source_project_id": project_id},
+        metadata={"source_project_id": project_id, "organization_id": duplicate.organization_id},
     )
     return _with_file_urls(duplicate)
 
 
 @app.post("/projects/{project_id}/generate-script")
 def generate_script(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.generate_script(project_id))
 
 
 @app.post("/projects/{project_id}/collect-sources")
 def collect_sources(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.collect_sources(project_id))
 
 
 @app.post("/projects/{project_id}/generate-slides")
 def generate_slides(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.generate_slides(project_id))
 
 
 @app.post("/projects/{project_id}/generate-voice")
 def generate_voice(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.generate_voice(project_id))
 
 
 @app.post("/projects/{project_id}/prepare-avatar")
 def prepare_avatar(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.prepare_avatar(project_id))
 
 
 @app.post("/projects/{project_id}/render")
 def render(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.render(project_id))
 
 
 @app.post("/projects/{project_id}/generate-all")
 def generate_all(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     return _sync_pipeline_response(pipeline.generate_all(project_id))
 
 
@@ -1136,13 +1391,14 @@ def get_job(job_id: str, request: Request) -> dict:
 
 @app.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, request: Request) -> dict:
-    visible_job = _get_job_or_404(job_id, request)
+    _get_job_or_404(job_id, request, permission="write")
+    user = _current_user(request)
     try:
         job = job_runner.cancel(job_id)
         _audit(
             request,
             "job.cancel",
-            actor_id=visible_job.owner_id,
+            actor_id=_actor_id(user),
             resource_type="job",
             resource_id=job.id,
             metadata={"project_id": job.project_id},
@@ -1158,13 +1414,14 @@ def cancel_job(job_id: str, request: Request) -> dict:
 
 @app.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str, request: Request) -> dict:
-    visible_job = _get_job_or_404(job_id, request)
+    _get_job_or_404(job_id, request, permission="write")
+    user = _current_user(request)
     try:
         job = job_runner.retry(job_id)
         _audit(
             request,
             "job.retry",
-            actor_id=visible_job.owner_id,
+            actor_id=_actor_id(user),
             resource_type="job",
             resource_id=job.id,
             metadata={"original_job_id": job_id, "project_id": job.project_id},
@@ -1207,13 +1464,14 @@ def list_project_jobs(
 
 @app.patch("/projects/{project_id}/scenes/{scene_id}")
 def patch_scene(project_id: str, scene_id: str, payload: ScenePatch, request: Request) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
+    user = _current_user(request)
     try:
         updated = store.patch_scene(project_id, scene_id, payload)
         _audit(
             request,
             "scene.update",
-            actor_id=project.owner_id,
+            actor_id=_actor_id(user),
             resource_type="scene",
             resource_id=scene_id,
             metadata={"project_id": project_id, "fields": sorted(payload.model_dump(exclude_unset=True).keys())},
@@ -1225,7 +1483,8 @@ def patch_scene(project_id: str, scene_id: str, payload: ScenePatch, request: Re
 
 @app.post("/projects/{project_id}/scenes")
 def insert_scene(project_id: str, payload: SceneCreate, request: Request) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
+    user = _current_user(request)
     try:
         existing_scene_ids = {scene.id for scene in project.scenes}
         updated = store.insert_scene(project_id, payload)
@@ -1233,7 +1492,7 @@ def insert_scene(project_id: str, payload: SceneCreate, request: Request) -> dic
         _audit(
             request,
             "scene.create",
-            actor_id=project.owner_id,
+            actor_id=_actor_id(user),
             resource_type="scene",
             resource_id=inserted.id,
             metadata={"project_id": project_id},
@@ -1245,13 +1504,14 @@ def insert_scene(project_id: str, payload: SceneCreate, request: Request) -> dic
 
 @app.delete("/projects/{project_id}/scenes/{scene_id}")
 def delete_scene(project_id: str, scene_id: str, request: Request) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
+    user = _current_user(request)
     try:
         updated = store.delete_scene(project_id, scene_id)
         _audit(
             request,
             "scene.delete",
-            actor_id=project.owner_id,
+            actor_id=_actor_id(user),
             resource_type="scene",
             resource_id=scene_id,
             metadata={"project_id": project_id},
@@ -1263,13 +1523,14 @@ def delete_scene(project_id: str, scene_id: str, request: Request) -> dict:
 
 @app.post("/projects/{project_id}/scenes/reorder")
 def reorder_scenes(project_id: str, payload: SceneReorder, request: Request) -> dict:
-    project = _get_project_or_404(project_id, request)
+    project = _get_project_or_404(project_id, request, permission="write")
+    user = _current_user(request)
     try:
         updated = store.reorder_scenes(project_id, payload)
         _audit(
             request,
             "scene.reorder",
-            actor_id=project.owner_id,
+            actor_id=_actor_id(user),
             resource_type="project",
             resource_id=project_id,
             metadata={"scene_count": len(payload.scene_ids)},
@@ -1281,7 +1542,7 @@ def reorder_scenes(project_id: str, payload: SceneReorder, request: Request) -> 
 
 @app.post("/projects/{project_id}/scenes/{scene_id}/regenerate-slide")
 def regenerate_scene_slide(project_id: str, scene_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request)
+    _get_project_or_404(project_id, request, permission="write")
     try:
         return _sync_pipeline_response(pipeline.regenerate_scene_slide(project_id, scene_id))
     except SceneNotFoundError:

@@ -3,6 +3,9 @@ import type {
   AuthToken,
   JobEvent,
   JobType,
+  Organization,
+  OrganizationMember,
+  OrganizationRole,
   Project,
   ProjectJob,
   ProjectManifest,
@@ -22,6 +25,7 @@ let accessToken: string | null = null;
 
 export type CreateProjectOptions = {
   topic: string;
+  organizationId?: string | null;
   useOfficialSources: boolean;
   useLlmScript: boolean;
   useTtsVoice: boolean;
@@ -107,6 +111,7 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
     }),
     body: JSON.stringify({
       topic: options.topic,
+      organization_id: options.organizationId,
       duration_minutes: 3,
       style: 'expert_review',
       language: 'ru',
@@ -129,6 +134,63 @@ export async function listProjects(): Promise<Project[]> {
   const response = await fetch(`${API_BASE_URL}/projects?limit=50&offset=0`, { headers: headers() });
   await assertOk(response, 'List projects');
   return response.json();
+}
+
+export async function listOrganizations(): Promise<Organization[]> {
+  const response = await fetch(`${API_BASE_URL}/organizations`, { headers: headers() });
+  await assertOk(response, 'List organizations');
+  return response.json();
+}
+
+export async function createOrganization(name: string): Promise<Organization> {
+  const response = await fetch(`${API_BASE_URL}/organizations`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name }),
+  });
+  await assertOk(response, 'Create organization');
+  return response.json();
+}
+
+export async function listOrganizationMembers(organizationId: string): Promise<OrganizationMember[]> {
+  const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/members`, { headers: headers() });
+  await assertOk(response, 'List organization members');
+  return response.json();
+}
+
+export async function addOrganizationMember(
+  organizationId: string,
+  target: { email?: string; user_id?: string; role: OrganizationRole },
+): Promise<OrganizationMember> {
+  const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/members`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(target),
+  });
+  await assertOk(response, 'Add organization member');
+  return response.json();
+}
+
+export async function updateOrganizationMember(
+  organizationId: string,
+  userId: string,
+  role: OrganizationRole,
+): Promise<OrganizationMember> {
+  const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/members/${userId}`, {
+    method: 'PATCH',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ role }),
+  });
+  await assertOk(response, 'Update organization member');
+  return response.json();
+}
+
+export async function removeOrganizationMember(organizationId: string, userId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/members/${userId}`, {
+    method: 'DELETE',
+    headers: headers(),
+  });
+  await assertOk(response, 'Remove organization member');
 }
 
 export async function generateAll(projectId: string): Promise<Project> {

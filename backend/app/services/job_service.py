@@ -149,7 +149,7 @@ class JobRunner:
         self.executor = ThreadPoolExecutor(max_workers=max(1, settings.job_workers))
         self._start_lock = Lock()
 
-    def start(self, project_id: str, job_type: JobType) -> ProjectJob:
+    def start(self, project_id: str, job_type: JobType, *, owner_id: str | None = None) -> ProjectJob:
         validate_project_id(project_id)
         with self._start_lock:
             active = self.job_store.active_for_project(project_id)
@@ -160,7 +160,7 @@ class JobRunner:
             job = self.job_store.create(
                 project_id,
                 job_type,
-                owner_id=project.owner_id,
+                owner_id=owner_id or project.owner_id,
                 organization_id=project.organization_id,
             )
             project.status = ProjectStatus.queued
@@ -190,7 +190,7 @@ class JobRunner:
         original = self.job_store.get(job_id)
         if original.status in {JobStatus.queued, JobStatus.running}:
             raise JobNotRetryableError("Active jobs cannot be retried")
-        retried = self.start(original.project_id, original.type)
+        retried = self.start(original.project_id, original.type, owner_id=original.owner_id)
         retried.add_event("retry_of", original.id, retried.progress)
         self.job_store.save(retried)
         return retried

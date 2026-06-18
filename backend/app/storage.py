@@ -55,6 +55,9 @@ class ProjectStore:
         organization_id: str | None = None,
     ) -> Project:
         data = payload.model_dump()
+        payload_organization_id = data.pop("organization_id", None)
+        if organization_id is None:
+            organization_id = payload_organization_id
         explicit_fields = payload.model_fields_set
 
         if "script_provider" not in explicit_fields:
@@ -77,7 +80,14 @@ class ProjectStore:
         self.save(project)
         return project
 
-    def duplicate_project(self, project_id: str, *, reset_outputs: bool = True) -> Project:
+    def duplicate_project(
+        self,
+        project_id: str,
+        *,
+        reset_outputs: bool = True,
+        owner_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> Project:
         original = self.get(project_id)
         clone_data = original.model_dump(mode="json")
         clone_data["id"] = f"project_{uuid4().hex[:12]}"
@@ -85,6 +95,10 @@ class ProjectStore:
         clone_data["status"] = ProjectStatus.draft
         clone_data["current_step"] = "duplicated"
         clone_data["error"] = None
+        if owner_id is not None:
+            clone_data["owner_id"] = owner_id
+        if organization_id is not None:
+            clone_data["organization_id"] = organization_id
         if reset_outputs:
             clone_data["sources"] = []
             clone_data["scenes"] = []

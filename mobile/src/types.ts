@@ -12,6 +12,7 @@ export type ProjectStatus =
   | 'failed';
 
 export type JobStatus = 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
+export type OrganizationRole = 'owner' | 'admin' | 'editor' | 'viewer';
 export type JobType =
   | 'generate_script'
   | 'collect_sources'
@@ -25,6 +26,7 @@ export type ProjectJob = {
   id: string;
   project_id: string;
   owner_id?: string | null;
+  organization_id?: string | null;
   type: JobType;
   status: JobStatus;
   progress: number;
@@ -124,6 +126,7 @@ export type SceneCreate = {
 export type Project = {
   id: string;
   owner_id?: string | null;
+  organization_id?: string | null;
   topic: string;
   duration_minutes: number;
   status: ProjectStatus;
@@ -168,6 +171,26 @@ export type AuthToken = {
   token_type: 'bearer';
   expires_at: string;
   user: UserPublic;
+};
+
+export type Organization = {
+  id: string;
+  name: string;
+  created_by_user_id: string;
+  disabled: boolean;
+  role: OrganizationRole;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OrganizationMember = {
+  organization_id: string;
+  user_id: string;
+  email?: string | null;
+  role: OrganizationRole;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AuditEvent = {
