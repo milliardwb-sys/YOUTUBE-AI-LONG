@@ -8,6 +8,7 @@ import {
   deleteProject,
   deleteScene,
   duplicateProject,
+  getAuditEvents,
   getJob,
   getProject,
   getProjectManifest,
@@ -23,7 +24,7 @@ import {
   setAccessToken,
   startProjectJob,
 } from './src/api';
-import type { Project, ProjectJob, ProjectManifest, Scene, UserPublic } from './src/types';
+import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UserPublic } from './src/types';
 
 export default function App() {
   const [topic, setTopic] = useState('5 AI-сервисов для создания видео в 2026 году');
@@ -38,6 +39,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(false);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<UserPublic | null>(null);
   const [authEmail, setAuthEmail] = useState('owner@example.com');
@@ -62,6 +65,7 @@ export default function App() {
       });
       setProject(created);
       await refreshProjects();
+      await refreshAuditEvents();
 
       const queuedJob = await startProjectJob(created.id, 'generate_all');
       setJob(queuedJob);
@@ -82,6 +86,7 @@ export default function App() {
         : await registerUser(authEmail.trim(), authPassword);
       setAuthUser(payload.user);
       await refreshProjects();
+      await refreshAuditEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Auth failed');
     } finally {
@@ -100,6 +105,7 @@ export default function App() {
       setAccessToken(null);
       setAuthUser(null);
       setProjects([]);
+      setAuditEvents([]);
       setProject(null);
       setJob(null);
       setManifest(null);
@@ -115,6 +121,17 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'Load projects failed');
     } finally {
       setProjectsLoading(false);
+    }
+  }
+
+  async function refreshAuditEvents() {
+    setAuditLoading(true);
+    try {
+      setAuditEvents(await getAuditEvents());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Load audit events failed');
+    } finally {
+      setAuditLoading(false);
     }
   }
 
@@ -134,6 +151,7 @@ export default function App() {
       setProject(selected);
       setManifest(await getProjectManifest(projectId));
       selectScene(selected.scenes?.[0] ?? null);
+      await refreshAuditEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Open project failed');
     } finally {
@@ -152,6 +170,7 @@ export default function App() {
       setManifest(await getProjectManifest(copy.id));
       selectScene(copy.scenes?.[0] ?? null);
       await refreshProjects();
+      await refreshAuditEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Duplicate project failed');
     } finally {
@@ -170,6 +189,7 @@ export default function App() {
       setManifest(null);
       selectScene(null);
       await refreshProjects();
+      await refreshAuditEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete project failed');
     } finally {
@@ -191,6 +211,7 @@ export default function App() {
     setManifest(await getProjectManifest(projectId));
     selectScene(finalProject.scenes?.[0] ?? null);
     await refreshProjects();
+    await refreshAuditEvents();
     if (currentJob.status === 'failed') {
       setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
     }
@@ -209,6 +230,7 @@ export default function App() {
         setProject(await getProject(project.id));
         setManifest(await getProjectManifest(project.id));
         await refreshProjects();
+        await refreshAuditEvents();
       }
       setLoading(false);
     } catch (err) {
@@ -225,6 +247,7 @@ export default function App() {
       setJob(retried);
       setManifest(null);
       await pollJob(project.id, retried);
+      await refreshAuditEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Retry failed');
     } finally {
@@ -236,6 +259,7 @@ export default function App() {
     setProject(updated);
     setManifest(await getProjectManifest(updated.id));
     await refreshProjects();
+    await refreshAuditEvents();
   }
 
   async function handleSaveScene() {
@@ -410,6 +434,26 @@ export default function App() {
                   {item.updated_at ? <Text style={styles.projectListMeta}>{new Date(item.updated_at).toLocaleString()}</Text> : null}
                 </View>
                 <Button title="Open" onPress={() => handleOpenProject(item.id)} disabled={loading} />
+              </View>
+            ))
+          )}
+        </View>
+
+        <View style={styles.auditPanel}>
+          <View style={styles.authRow}>
+            <Text style={styles.sectionTitle}>Audit log</Text>
+            <Button title={auditLoading ? 'Loading' : 'Refresh'} onPress={refreshAuditEvents} disabled={auditLoading || loading} />
+          </View>
+          {auditEvents.length === 0 ? (
+            <Text style={styles.emptyText}>No audit events loaded</Text>
+          ) : (
+            auditEvents.slice(0, 8).map((event) => (
+              <View key={event.id} style={styles.auditItem}>
+                <Text style={styles.auditAction}>{event.action}</Text>
+                <Text style={styles.auditMeta}>
+                  {event.resource_type}{event.resource_id ? ` · ${event.resource_id}` : ''}
+                </Text>
+                <Text style={styles.auditMeta}>{new Date(event.created_at).toLocaleString()}</Text>
               </View>
             ))
           )}
@@ -590,6 +634,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: '#c8d0ee' },
   authPanel: { backgroundColor: '#1d2440', borderRadius: 8, padding: 14, gap: 10 },
   projectListPanel: { backgroundColor: '#162034', borderRadius: 8, padding: 14, gap: 10 },
+  auditPanel: { backgroundColor: '#132b2f', borderRadius: 8, padding: 14, gap: 10 },
   sectionTitle: { color: 'white', fontWeight: '800', fontSize: 16 },
   authRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   authText: { color: '#e5e7eb', fontWeight: '700', flex: 1 },
@@ -613,6 +658,9 @@ const styles = StyleSheet.create({
   },
   projectListTitle: { color: '#111827', fontWeight: '800' },
   projectListMeta: { color: '#475569', marginTop: 2, fontSize: 12 },
+  auditItem: { backgroundColor: '#ecfeff', borderRadius: 8, padding: 10 },
+  auditAction: { color: '#0f172a', fontWeight: '800' },
+  auditMeta: { color: '#475569', marginTop: 2, fontSize: 12 },
   label: { color: 'white', fontWeight: '700', marginTop: 16 },
   input: {
     minHeight: 110,
