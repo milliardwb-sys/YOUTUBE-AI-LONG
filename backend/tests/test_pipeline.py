@@ -151,6 +151,33 @@ def test_official_sources_and_slides(tmp_path):
     assert all(source.screenshot_path and Path(source.screenshot_path).exists() for source in result.sources)
 
 
+def test_visual_service_writes_render_template_manifest(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="Production render templates for AI video",
+            duration_minutes=1,
+            visual_mode=VisualMode.official_sites_plus_ai,
+            source_urls=["https://example.com/"],
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+    result = pipeline.generate_script(project.id)
+    result = pipeline.collect_sources(result.id)
+    result = pipeline.generate_slides(result.id)
+
+    manifest_path = store.project_dir(result.id) / "slides" / "render_templates.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    template_ids = {item["template_id"] for item in manifest}
+
+    assert manifest_path.exists()
+    assert len(manifest) == len(result.scenes)
+    assert "source_review_v1" in template_ids
+    assert len(template_ids) >= 2
+    assert all(item["layout"] for item in manifest)
+
+
 def test_source_service_uses_search_provider_results(tmp_path):
     from app.services.search_provider import SearchResult
 
