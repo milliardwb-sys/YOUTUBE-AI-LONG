@@ -891,12 +891,17 @@ def ready() -> dict[str, str | bool]:
     ffmpeg_available = bool(pipeline.render_service.resolve_ffmpeg_bin())
     data_dir_writable = _data_dir_is_writable()
     project_storage_available = store.health()
+    job_storage_available = job_store.health()
     return {
-        "status": "ready" if ffmpeg_available and data_dir_writable and project_storage_available else "not_ready",
+        "status": "ready"
+        if ffmpeg_available and data_dir_writable and project_storage_available and job_storage_available
+        else "not_ready",
         "ffmpeg_available": ffmpeg_available,
         "data_dir_writable": data_dir_writable,
         "project_storage_backend": settings.project_storage_backend,
         "project_storage_available": project_storage_available,
+        "job_storage_backend": settings.job_storage_backend,
+        "job_storage_available": job_storage_available,
     }
 
 
@@ -937,6 +942,7 @@ def diagnostics() -> dict:
         "jobs": {
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
+            "storage": job_store.metadata(),
             **job_store.stats(),
         },
         "render": {
@@ -1156,6 +1162,7 @@ def providers() -> dict:
             "available": [item.value for item in JobType],
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
+            "storage": job_store.metadata(),
         },
     }
 

@@ -9,6 +9,7 @@ from typing import Callable
 from app.config import Settings
 from app.models import JobStatus, JobType, ProjectJob, ProjectStatus
 from app.pipeline import VideoPipeline
+from app.postgres_job_store import PostgresJobRepository
 from app.utils.files import ensure_dir, read_json, write_json
 from app.utils.security import validate_job_id, validate_project_id
 
@@ -34,16 +35,18 @@ class JobCancelledError(RuntimeError):
 
 
 class JobStore:
-    """Small file-backed job store for the MVP.
+    """Job state store with local JSON and PostgreSQL-backed modes.
 
-    Production should replace this with Redis/BullMQ, Celery, Temporal, or a DB-backed queue.
-    This implementation is intentionally simple so the mobile client can already work with
-    queued generation and progress polling.
+    The in-process runner still executes work, but persisted job records can now live in
+    PostgreSQL so status/progress survives process restarts.
     """
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.jobs_dir = ensure_dir(settings.data_dir / "_jobs")
+        self._postgres: PostgresJobRepository | None = None
+        if settings.job_storage_backend == "postgres":
+            self._postgres = PostgresJobRepository(settings)
         self._lock = Lock()
 
     def job_file(self, job_id: str) -> Path:
@@ -67,9 +70,17 @@ class JobStore:
     def save(self, job: ProjectJob) -> None:
         with self._lock:
             job.touch()
+            if self._postgres is not None:
+                self._postgres.save(job)
+                return
             write_json(self.job_file(job.id), job.model_dump(mode="json"))
 
     def get(self, job_id: str) -> ProjectJob:
+        if self._postgres is not None:
+            job = self._postgres.get(job_id)
+            if job is None:
+                raise JobNotFoundError(job_id)
+            return job
         path = self.job_file(job_id)
         if not path.exists():
             raise JobNotFoundError(job_id)
@@ -77,6 +88,8 @@ class JobStore:
 
     def list_for_project(self, project_id: str) -> list[ProjectJob]:
         validate_project_id(project_id)
+        if self._postgres is not None:
+            return self._postgres.list_for_project(project_id)
         jobs: list[ProjectJob] = []
         for job_file in sorted(self.jobs_dir.glob("job_*.json")):
             job = ProjectJob.model_validate(read_json(job_file))
@@ -96,12 +109,17 @@ class JobStore:
             if job.status not in {JobStatus.queued, JobStatus.running}:
                 raise JobNotCancellableError(f"Job is already {job.status}")
             job.mark_cancelled(reason)
+            if self._postgres is not None:
+                self._postgres.save(job)
+                return job
             write_json(self.job_file(job.id), job.model_dump(mode="json"))
             return job
 
     def cleanup_old_jobs(self, retention_days: int | None = None) -> dict[str, int]:
         retention = retention_days if retention_days is not None else self.settings.cleanup_retention_days
         cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, retention))
+        if self._postgres is not None:
+            return self._postgres.cleanup_old_jobs(cutoff)
         removed = 0
         skipped = 0
         for job_file in sorted(self.jobs_dir.glob("job_*.json")):
@@ -114,6 +132,8 @@ class JobStore:
         return {"removed_jobs": removed, "skipped_jobs": skipped}
 
     def list_all(self) -> list[ProjectJob]:
+        if self._postgres is not None:
+            return self._postgres.list_all()
         jobs: list[ProjectJob] = []
         for job_file in sorted(self.jobs_dir.glob("job_*.json")):
             jobs.append(ProjectJob.model_validate(read_json(job_file)))
@@ -133,12 +153,26 @@ class JobStore:
             else:
                 terminal += 1
         return {
+            "storage_backend": self.settings.job_storage_backend,
             "job_count": len(jobs),
             "active_jobs": active,
             "terminal_jobs": terminal,
             "jobs_by_status": by_status,
             "jobs_by_type": by_type,
         }
+
+    def metadata(self) -> dict[str, object]:
+        if self._postgres is not None:
+            return self._postgres.metadata()
+        return {
+            "backend": "local",
+            "jobs_dir": self.jobs_dir.as_posix(),
+        }
+
+    def health(self) -> bool:
+        if self._postgres is not None:
+            return self._postgres.ping()
+        return self.jobs_dir.exists()
 
 
 class JobRunner:

@@ -53,6 +53,7 @@ def make_settings(tmp_path: Path) -> Settings:
         burn_subtitles_by_default=False,
         run_jobs_inline=True,
         job_workers=1,
+        job_storage_backend="local",
         api_key=None,
         admin_api_key=None,
         enable_user_auth=False,
@@ -315,6 +316,7 @@ def test_project_and_job_stats(tmp_path):
     assert project_stats["storage_backend"] == "local"
     assert project_stats["projects_by_status"]["draft"] == 1
     assert project_stats["storage_files"] >= 2
+    assert job_stats["storage_backend"] == "local"
     assert job_stats["job_count"] == 1
     assert job_stats["terminal_jobs"] == 1
     assert job_stats["jobs_by_status"]["cancelled"] == 1
@@ -327,6 +329,14 @@ def test_project_store_reports_local_backend(tmp_path):
 
     assert store.metadata()["backend"] == "local"
     assert store.health() is True
+
+
+def test_job_store_reports_local_backend(tmp_path):
+    settings = make_settings(tmp_path)
+    job_store = JobStore(settings)
+
+    assert job_store.metadata()["backend"] == "local"
+    assert job_store.health() is True
 
 
 def test_inline_job_runner_generate_all(tmp_path):
@@ -464,6 +474,23 @@ def test_get_settings_rejects_unknown_project_storage_backend(tmp_path, monkeypa
 def test_get_settings_requires_database_url_for_postgres_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("PROJECT_STORAGE_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
+
+
+def test_get_settings_rejects_unknown_job_storage_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("JOB_STORAGE_BACKEND", "sqlite")
+
+    with pytest.raises(ConfigurationError, match="JOB_STORAGE_BACKEND"):
+        get_settings()
+
+
+def test_get_settings_requires_database_url_for_postgres_job_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("JOB_STORAGE_BACKEND", "postgres")
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="DATABASE_URL"):
@@ -1261,6 +1288,7 @@ def test_production_requires_api_key_for_private_routes(tmp_path, monkeypatch):
     providers = client.get("/providers")
     assert providers.status_code == 200
     assert providers.json()["project_storage"]["backend"] == "local"
+    assert providers.json()["jobs"]["storage"]["backend"] == "local"
     response = client.get("/projects")
 
     assert response.status_code == 403

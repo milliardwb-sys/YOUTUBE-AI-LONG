@@ -42,6 +42,7 @@ class Settings:
     burn_subtitles_by_default: bool
     run_jobs_inline: bool
     job_workers: int
+    job_storage_backend: str
     api_key: str | None
     admin_api_key: str | None
     enable_user_auth: bool
@@ -142,6 +143,7 @@ def get_settings() -> Settings:
         burn_subtitles_by_default=_env_bool("BURN_SUBTITLES_BY_DEFAULT", False),
         run_jobs_inline=_env_bool("RUN_JOBS_INLINE", False),
         job_workers=_env_int("JOB_WORKERS", 2),
+        job_storage_backend=os.getenv("JOB_STORAGE_BACKEND", "local").strip().lower(),
         api_key=_env_optional("API_KEY"),
         admin_api_key=_env_optional("ADMIN_API_KEY"),
         enable_user_auth=_env_bool("ENABLE_USER_AUTH", False),
@@ -177,6 +179,10 @@ def validate_settings(settings: Settings) -> None:
         raise ConfigurationError("PROJECT_STORAGE_BACKEND must be either 'local' or 'postgres'")
     if settings.project_storage_backend == "postgres" and not settings.database_url:
         raise ConfigurationError("DATABASE_URL is required when PROJECT_STORAGE_BACKEND=postgres")
+    if settings.job_storage_backend not in {"local", "postgres"}:
+        raise ConfigurationError("JOB_STORAGE_BACKEND must be either 'local' or 'postgres'")
+    if settings.job_storage_backend == "postgres" and not settings.database_url:
+        raise ConfigurationError("DATABASE_URL is required when JOB_STORAGE_BACKEND=postgres")
     if settings.app_env in LOCAL_ENVS or not settings.api_key:
         return
     if settings.api_key in WEAK_PRODUCTION_API_KEYS:

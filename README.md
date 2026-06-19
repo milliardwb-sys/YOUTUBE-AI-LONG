@@ -107,7 +107,7 @@ cp backend/.env.production.example backend/.env.production
 docker compose up --build
 ```
 
-Docker Compose now starts PostgreSQL for project metadata when `PROJECT_STORAGE_BACKEND=postgres` is set in `backend/.env.production`.
+Docker Compose now starts PostgreSQL for project metadata and durable job state when `PROJECT_STORAGE_BACKEND=postgres` and `JOB_STORAGE_BACKEND=postgres` are set in `backend/.env.production`.
 Generated files still use the `backend-projects` volume through `DATA_DIR`.
 Replace the example database password before any public deployment.
 

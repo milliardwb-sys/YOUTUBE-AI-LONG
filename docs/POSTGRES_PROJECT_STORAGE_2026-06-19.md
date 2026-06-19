@@ -78,8 +78,8 @@ PROJECT_STORAGE_BACKEND=postgres
 
 ## Still Not Production-Complete
 
-- Users, sessions, organizations, consent records, audit events, usage events, idempotency records, and jobs are still file-backed.
-- Jobs are still executed by local `ThreadPoolExecutor`; durable queue is a separate backlog item.
+- Users, sessions, organizations, consent records, audit events, usage events, and idempotency records are still file-backed.
+- Jobs now have a separate PostgreSQL storage foundation, but execution still uses local `ThreadPoolExecutor`.
 - Generated artifacts still live on local disk unless a future object-storage backend is enabled.
 - There is no Alembic migration chain yet; schema bootstrap is automatic and intentionally minimal.
 - There is no database connection pool package yet; operations open short-lived psycopg connections.
