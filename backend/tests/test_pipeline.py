@@ -45,6 +45,7 @@ def make_settings(tmp_path: Path) -> Settings:
         database_auto_migrate=True,
         audit_storage_backend="local",
         support_storage_backend="local",
+        idempotency_storage_backend="local",
         enable_browser_screenshots=False,
         browser_timeout_ms=1000,
         default_script_provider="template",
@@ -416,6 +417,17 @@ def test_support_service_reports_local_backend(tmp_path):
     assert support.metadata()["tickets_dir"].endswith("/_support/tickets")
 
 
+def test_idempotency_store_reports_local_backend(tmp_path):
+    from app.services.idempotency_service import IdempotencyStore
+
+    settings = make_settings(tmp_path)
+    store = IdempotencyStore(settings)
+
+    assert store.metadata()["backend"] == "local"
+    assert store.metadata()["record_count"] == 0
+    assert store.metadata()["records_dir"].endswith("/_idempotency")
+
+
 def test_inline_job_runner_generate_all(tmp_path):
     settings = make_settings(tmp_path)
     store = ProjectStore(settings)
@@ -666,6 +678,23 @@ def test_get_settings_rejects_unknown_support_storage_backend(tmp_path, monkeypa
 def test_get_settings_requires_database_url_for_postgres_support_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SUPPORT_STORAGE_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
+
+
+def test_get_settings_rejects_unknown_idempotency_storage_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("IDEMPOTENCY_STORAGE_BACKEND", "sqlite")
+
+    with pytest.raises(ConfigurationError, match="IDEMPOTENCY_STORAGE_BACKEND"):
+        get_settings()
+
+
+def test_get_settings_requires_database_url_for_postgres_idempotency_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("IDEMPOTENCY_STORAGE_BACKEND", "postgres")
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="DATABASE_URL"):

@@ -1014,6 +1014,7 @@ def diagnostics() -> dict:
         },
         "billing": billing_service.metadata(),
         "audit": audit_log.metadata(),
+        "idempotency": idempotency_store.metadata(),
         "auth": {
             "user_auth_enabled": settings.enable_user_auth,
             "oidc": oidc_service.metadata(),
@@ -1341,6 +1342,7 @@ def providers() -> dict:
         "artifacts": artifact_store.metadata(),
         "billing": billing_service.metadata(),
         "audit": audit_log.metadata(),
+        "idempotency": idempotency_store.metadata(),
         "auth": {
             "user_auth_enabled": settings.enable_user_auth,
             "oidc": oidc_service.metadata(),
