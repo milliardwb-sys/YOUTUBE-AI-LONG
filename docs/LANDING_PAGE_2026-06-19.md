@@ -6,6 +6,7 @@
 - Responsive CSS in `landing/styles.css`.
 - Generated dashboard hero asset in `landing/assets/hero-dashboard.png`.
 - Local publishing instructions in `landing/README.md`.
+- GitHub Pages workflow in `.github/workflows/deploy-landing.yml`.
 
 ## Product message
 
