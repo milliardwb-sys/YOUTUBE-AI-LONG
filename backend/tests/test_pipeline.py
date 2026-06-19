@@ -42,6 +42,7 @@ def make_settings(tmp_path: Path) -> Settings:
         database_connect_timeout_seconds=10,
         database_auto_migrate=True,
         audit_storage_backend="local",
+        support_storage_backend="local",
         enable_browser_screenshots=False,
         browser_timeout_ms=1000,
         default_script_provider="template",
@@ -401,6 +402,17 @@ def test_audit_log_reports_local_backend(tmp_path):
     assert audit_log.metadata()["events_dir"].endswith("/_audit")
 
 
+def test_support_service_reports_local_backend(tmp_path):
+    from app.services.support_service import SupportService
+
+    settings = make_settings(tmp_path)
+    support = SupportService(settings)
+
+    assert support.metadata()["backend"] == "local"
+    assert support.metadata()["ticket_count"] == 0
+    assert support.metadata()["tickets_dir"].endswith("/_support/tickets")
+
+
 def test_inline_job_runner_generate_all(tmp_path):
     settings = make_settings(tmp_path)
     store = ProjectStore(settings)
@@ -626,6 +638,23 @@ def test_get_settings_rejects_unknown_audit_storage_backend(tmp_path, monkeypatc
 def test_get_settings_requires_database_url_for_postgres_audit_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("AUDIT_STORAGE_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
+
+
+def test_get_settings_rejects_unknown_support_storage_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SUPPORT_STORAGE_BACKEND", "sqlite")
+
+    with pytest.raises(ConfigurationError, match="SUPPORT_STORAGE_BACKEND"):
+        get_settings()
+
+
+def test_get_settings_requires_database_url_for_postgres_support_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SUPPORT_STORAGE_BACKEND", "postgres")
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="DATABASE_URL"):

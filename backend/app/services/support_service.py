@@ -24,6 +24,11 @@ class SupportService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.tickets_dir = ensure_dir(settings.data_dir / "_support" / "tickets")
+        self._postgres = None
+        if settings.support_storage_backend == "postgres":
+            from app.postgres_support_store import PostgresSupportRepository
+
+            self._postgres = PostgresSupportRepository(settings)
 
     def create_ticket(self, payload: SupportTicketCreate, *, created_by: str | None = None) -> SupportTicket:
         note = SupportTicketNote(author=created_by, body=payload.message, internal=False)
@@ -46,6 +51,11 @@ class SupportService:
             clean_id = validate_support_ticket_id(ticket_id)
         except InvalidIdentifierError as exc:
             raise SupportTicketNotFoundError(ticket_id) from exc
+        if self._postgres is not None:
+            ticket = self._postgres.get_ticket(clean_id)
+            if ticket is None:
+                raise SupportTicketNotFoundError(ticket_id)
+            return ticket
         path = self._ticket_file(clean_id)
         if not path.exists():
             raise SupportTicketNotFoundError(ticket_id)
@@ -58,6 +68,8 @@ class SupportService:
         user_id: str | None = None,
         project_id: str | None = None,
     ) -> list[SupportTicket]:
+        if self._postgres is not None:
+            return self._postgres.list_tickets(status=status, user_id=user_id, project_id=project_id)
         tickets: list[SupportTicket] = []
         for path in sorted(self.tickets_dir.glob("ticket_*.json")):
             try:
@@ -99,9 +111,14 @@ class SupportService:
         return ticket
 
     def save(self, ticket: SupportTicket) -> None:
+        if self._postgres is not None:
+            self._postgres.save(ticket)
+            return
         write_json(self._ticket_file(ticket.id), ticket.model_dump(mode="json"))
 
     def metadata(self) -> dict[str, object]:
+        if self._postgres is not None:
+            return self._postgres.metadata()
         tickets = self.list_tickets()
         by_status: dict[str, int] = {}
         for ticket in tickets:
