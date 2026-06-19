@@ -203,9 +203,29 @@ class JobRunner:
 
         if self.settings.run_jobs_inline:
             self._execute(job.id)
-        else:
+        elif self.settings.execute_jobs_in_api:
             self.executor.submit(self._execute, job.id)
+        else:
+            job.add_event("queued_for_external_worker", "Waiting for external job worker", job.progress)
+            self.job_store.save(job)
         return self.job_store.get(job.id)
+
+    def run_next_queued(self) -> ProjectJob | None:
+        queued = [job for job in self.job_store.list_all() if job.status == JobStatus.queued]
+        if not queued:
+            return None
+        job = sorted(queued, key=lambda item: (item.created_at, item.id))[0]
+        self._execute(job.id)
+        return self.job_store.get(job.id)
+
+    def run_queued_batch(self, *, limit: int = 1) -> list[ProjectJob]:
+        completed: list[ProjectJob] = []
+        for _ in range(max(1, limit)):
+            job = self.run_next_queued()
+            if job is None:
+                break
+            completed.append(job)
+        return completed
 
     def cancel(self, job_id: str) -> ProjectJob:
         job = self.job_store.cancel(job_id)

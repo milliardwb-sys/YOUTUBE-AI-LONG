@@ -23,8 +23,26 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      EXECUTE_JOBS_IN_API: "false"
     ports:
       - "8000:8000"
+    volumes:
+      - backend-projects:/data/projects
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "job_worker.py", "--poll-interval", "5", "--limit", "1"]
+    env_file:
+      - backend/.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      EXECUTE_JOBS_IN_API: "false"
     volumes:
       - backend-projects:/data/projects
     restart: unless-stopped

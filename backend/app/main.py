@@ -981,6 +981,7 @@ def diagnostics() -> dict:
         },
         "jobs": {
             "run_inline": settings.run_jobs_inline,
+            "execute_in_api": settings.execute_jobs_in_api,
             "workers": settings.job_workers,
             "storage": job_store.metadata(),
             **job_store.stats(),
@@ -1308,6 +1309,7 @@ def providers() -> dict:
         "jobs": {
             "available": [item.value for item in JobType],
             "run_inline": settings.run_jobs_inline,
+            "execute_in_api": settings.execute_jobs_in_api,
             "workers": settings.job_workers,
             "storage": job_store.metadata(),
         },

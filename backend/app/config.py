@@ -41,6 +41,7 @@ class Settings:
     max_openai_tts_chars: int
     burn_subtitles_by_default: bool
     run_jobs_inline: bool
+    execute_jobs_in_api: bool
     job_workers: int
     job_storage_backend: str
     api_key: str | None
@@ -167,6 +168,7 @@ def get_settings() -> Settings:
         max_openai_tts_chars=_env_int("MAX_OPENAI_TTS_CHARS", 3800),
         burn_subtitles_by_default=_env_bool("BURN_SUBTITLES_BY_DEFAULT", False),
         run_jobs_inline=_env_bool("RUN_JOBS_INLINE", False),
+        execute_jobs_in_api=_env_bool("EXECUTE_JOBS_IN_API", True),
         job_workers=_env_int("JOB_WORKERS", 2),
         job_storage_backend=os.getenv("JOB_STORAGE_BACKEND", "local").strip().lower(),
         api_key=_env_optional("API_KEY"),

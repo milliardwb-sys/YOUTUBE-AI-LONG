@@ -55,6 +55,7 @@ def make_settings(tmp_path: Path) -> Settings:
         max_openai_tts_chars=3800,
         burn_subtitles_by_default=False,
         run_jobs_inline=True,
+        execute_jobs_in_api=True,
         job_workers=1,
         job_storage_backend="local",
         api_key=None,
@@ -1844,6 +1845,48 @@ def test_job_runner_can_cancel_queued_job_and_retry(tmp_path):
     assert retried.id != job.id
     assert retried.status == JobStatus.failed
     assert "Project has no scenes" in (retried.error or "")
+
+
+def test_job_runner_can_enqueue_without_api_execution_and_worker_drains_queue(tmp_path):
+    settings = make_settings(tmp_path)
+    settings = Settings(
+        **{
+            **settings.__dict__,
+            "run_jobs_inline": False,
+            "execute_jobs_in_api": False,
+        }
+    )
+    store = ProjectStore(settings)
+    pipeline = make_pipeline(settings, store)
+    job_store = JobStore(settings)
+    runner = JobRunner(settings, pipeline, job_store)
+    project = store.create_project(ProjectCreate(topic="External worker job execution"))
+
+    queued = runner.start(project.id, JobType.generate_script)
+
+    assert queued.status == JobStatus.queued
+    assert any(event["event"] == "queued_for_external_worker" for event in queued.events)
+    assert store.get(project.id).status == ProjectStatus.queued
+
+    completed = runner.run_next_queued()
+
+    assert completed is not None
+    assert completed.id == queued.id
+    assert completed.status == JobStatus.completed
+    assert store.get(project.id).status == ProjectStatus.script_ready
+
+
+def test_worker_cli_help_loads(tmp_path):
+    result = subprocess.run(
+        [sys.executable, "backend/job_worker.py", "--help"],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0
+    assert "queued AI Video Studio jobs" in result.stdout
 
 
 def test_job_store_rejects_cancelling_terminal_job(tmp_path):
