@@ -46,6 +46,7 @@ def make_settings(tmp_path: Path) -> Settings:
         audit_storage_backend="local",
         support_storage_backend="local",
         idempotency_storage_backend="local",
+        usage_storage_backend="local",
         enable_browser_screenshots=False,
         browser_timeout_ms=1000,
         default_script_provider="template",
@@ -428,6 +429,20 @@ def test_idempotency_store_reports_local_backend(tmp_path):
     assert store.metadata()["records_dir"].endswith("/_idempotency")
 
 
+def test_usage_service_reports_local_backend(tmp_path):
+    from app.services.usage_service import UsageService
+
+    settings = make_settings(tmp_path)
+    usage = UsageService(settings)
+    usage.record("job.start", actor_id="user_aaaaaaaaaaaa", units=2, estimated_cost_cents=3)
+
+    assert usage.metadata()["backend"] == "local"
+    assert usage.metadata()["event_count"] == 1
+    assert usage.metadata()["total_units"] == 2
+    assert usage.metadata()["estimated_cost_cents"] == 3
+    assert usage.metadata()["events_dir"].endswith("/_usage")
+
+
 def test_inline_job_runner_generate_all(tmp_path):
     settings = make_settings(tmp_path)
     store = ProjectStore(settings)
@@ -695,6 +710,23 @@ def test_get_settings_rejects_unknown_idempotency_storage_backend(tmp_path, monk
 def test_get_settings_requires_database_url_for_postgres_idempotency_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("IDEMPOTENCY_STORAGE_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
+
+
+def test_get_settings_rejects_unknown_usage_storage_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("USAGE_STORAGE_BACKEND", "sqlite")
+
+    with pytest.raises(ConfigurationError, match="USAGE_STORAGE_BACKEND"):
+        get_settings()
+
+
+def test_get_settings_requires_database_url_for_postgres_usage_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("USAGE_STORAGE_BACKEND", "postgres")
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="DATABASE_URL"):

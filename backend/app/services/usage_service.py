@@ -24,11 +24,16 @@ class UsageEvent:
 
 
 class UsageService:
-    """File-backed usage and cost ledger for MVP quota/billing foundations."""
+    """Usage and cost ledger for quota/billing foundations."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.events_dir = ensure_dir(settings.data_dir / "_usage")
+        self._postgres = None
+        if settings.usage_storage_backend == "postgres":
+            from app.postgres_usage_store import PostgresUsageRepository
+
+            self._postgres = PostgresUsageRepository(settings)
 
     def record(
         self,
@@ -52,10 +57,19 @@ class UsageService:
             metadata=metadata or {},
             created_at=datetime.now(timezone.utc),
         )
+        self.save_event(event)
+        return event
+
+    def save_event(self, event: UsageEvent) -> UsageEvent:
+        if self._postgres is not None:
+            self._postgres.save(event)
+            return event
         write_json(self._event_file(event), self._event_to_json(event))
         return event
 
     def list_events(self, *, actor_id: str | None = None) -> list[UsageEvent]:
+        if self._postgres is not None:
+            return self._postgres.list_events(actor_id=actor_id)
         events: list[UsageEvent] = []
         for event_file in sorted(self.events_dir.glob("usage_*.json")):
             try:
@@ -86,6 +100,8 @@ class UsageService:
     def cleanup_old_events(self, retention_days: int | None = None) -> dict[str, int]:
         retention = retention_days if retention_days is not None else self.settings.cleanup_retention_days
         cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, retention))
+        if self._postgres is not None:
+            return self._postgres.cleanup_old_events(cutoff)
         removed = 0
         skipped = 0
         for event_file in sorted(self.events_dir.glob("usage_*.json")):
@@ -100,6 +116,18 @@ class UsageService:
             event_file.unlink(missing_ok=True)
             removed += 1
         return {"removed_usage_events": removed, "skipped_usage_events": skipped}
+
+    def metadata(self) -> dict[str, object]:
+        if self._postgres is not None:
+            return self._postgres.metadata()
+        summary = self.summary()
+        return {
+            "backend": "local",
+            "events_dir": self.events_dir.as_posix(),
+            "event_count": summary["event_count"],
+            "total_units": summary["total_units"],
+            "estimated_cost_cents": summary["estimated_cost_cents"],
+        }
 
     def _event_file(self, event: UsageEvent) -> Path:
         return self.events_dir / f"{event.id}.json"

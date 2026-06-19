@@ -60,6 +60,7 @@ class Settings:
     audit_storage_backend: str
     support_storage_backend: str
     idempotency_storage_backend: str
+    usage_storage_backend: str
     rate_limit_requests_per_minute: int
     cors_origins: list[str]
     allow_unsafe_http_sources: bool
@@ -190,6 +191,7 @@ def get_settings() -> Settings:
         audit_storage_backend=os.getenv("AUDIT_STORAGE_BACKEND", "local").strip().lower(),
         support_storage_backend=os.getenv("SUPPORT_STORAGE_BACKEND", "local").strip().lower(),
         idempotency_storage_backend=os.getenv("IDEMPOTENCY_STORAGE_BACKEND", "local").strip().lower(),
+        usage_storage_backend=os.getenv("USAGE_STORAGE_BACKEND", "local").strip().lower(),
         rate_limit_requests_per_minute=_env_int("RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
         cors_origins=_env_list("CORS_ORIGINS", ["http://localhost:19006", "http://localhost:8081"]),
         allow_unsafe_http_sources=_env_bool("ALLOW_UNSAFE_HTTP_SOURCES", False),
@@ -276,6 +278,10 @@ def validate_settings(settings: Settings) -> None:
         raise ConfigurationError("IDEMPOTENCY_STORAGE_BACKEND must be either 'local' or 'postgres'")
     if settings.idempotency_storage_backend == "postgres" and not settings.database_url:
         raise ConfigurationError("DATABASE_URL is required when IDEMPOTENCY_STORAGE_BACKEND=postgres")
+    if settings.usage_storage_backend not in {"local", "postgres"}:
+        raise ConfigurationError("USAGE_STORAGE_BACKEND must be either 'local' or 'postgres'")
+    if settings.usage_storage_backend == "postgres" and not settings.database_url:
+        raise ConfigurationError("DATABASE_URL is required when USAGE_STORAGE_BACKEND=postgres")
     if settings.app_env in LOCAL_ENVS or not settings.api_key:
         return
     if settings.api_key in WEAK_PRODUCTION_API_KEYS:

@@ -1015,6 +1015,7 @@ def diagnostics() -> dict:
         "billing": billing_service.metadata(),
         "audit": audit_log.metadata(),
         "idempotency": idempotency_store.metadata(),
+        "usage_storage": usage_service.metadata(),
         "auth": {
             "user_auth_enabled": settings.enable_user_auth,
             "oidc": oidc_service.metadata(),
@@ -1343,6 +1344,7 @@ def providers() -> dict:
         "billing": billing_service.metadata(),
         "audit": audit_log.metadata(),
         "idempotency": idempotency_store.metadata(),
+        "usage_storage": usage_service.metadata(),
         "auth": {
             "user_auth_enabled": settings.enable_user_auth,
             "oidc": oidc_service.metadata(),
@@ -1404,6 +1406,7 @@ def admin_overview(request: Request) -> dict:
         "artifacts": artifact_store.metadata(),
         "jobs": job_store.stats(),
         "usage": usage_service.summary(),
+        "usage_storage": usage_service.metadata(),
         "billing": {
             "metadata": billing_service.metadata(),
             "account_count": len(billing_service.list_accounts()),
