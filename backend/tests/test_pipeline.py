@@ -33,6 +33,8 @@ def make_settings(tmp_path: Path) -> Settings:
         app_env="test",
         data_dir=tmp_path,
         public_base_url="http://test",
+        log_level="INFO",
+        json_logs=False,
         ffmpeg_bin="ffmpeg",
         render_width=1920,
         render_height=1080,
@@ -584,6 +586,14 @@ def test_get_settings_uses_default_for_invalid_openai_temperature(tmp_path, monk
     settings = get_settings()
 
     assert settings.openai_temperature == 0.55
+
+
+def test_get_settings_rejects_unknown_log_level(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+
+    with pytest.raises(ConfigurationError, match="LOG_LEVEL"):
+        get_settings()
 
 
 def test_get_settings_parses_rate_limit(tmp_path, monkeypatch):
@@ -1600,13 +1610,18 @@ def test_admin_support_ticket_workflow_records_audit(tmp_path, monkeypatch):
 def test_observability_metrics_collects_requests(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("JSON_LOGS", "true")
+    monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.delenv("API_KEY", raising=False)
     sys.modules.pop("app.main", None)
     main = importlib.import_module("app.main")
     client = TestClient(main.app)
 
-    assert client.get("/health").status_code == 200
+    health = client.get("/health", headers={"X-Request-ID": "req_test_observability"})
+    assert health.status_code == 200
+    assert health.headers["x-request-id"] == "req_test_observability"
     response = client.get("/observability/metrics")
+    diagnostics = client.get("/diagnostics")
 
     assert response.status_code == 200
     metrics = response.json()["metrics"]
@@ -1617,6 +1632,7 @@ def test_observability_metrics_collects_requests(tmp_path, monkeypatch):
     assert prometheus.status_code == 200
     assert "ai_video_studio_requests_total" in prometheus.text
     assert 'ai_video_studio_requests_by_status_total{status="200"}' in prometheus.text
+    assert diagnostics.json()["logging"] == {"level": "DEBUG", "json_logs": True}
 
 
 def test_api_project_manifest_reports_readiness_and_missing_artifacts(tmp_path, monkeypatch):

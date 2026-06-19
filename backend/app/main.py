@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
+from datetime import datetime, timezone
 from threading import Lock
 from uuid import uuid4
 
@@ -78,7 +80,40 @@ from app.storage import InvalidSceneOrderError, ProjectNotFoundError, ProjectSto
 from app.models import ProjectStatus
 from app.utils.security import InvalidIdentifierError, UnsafePathError, validate_organization_id, validate_user_id
 
+
+class JsonLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for key in ("request_id", "method", "path", "status_code", "elapsed_ms"):
+            if hasattr(record, key):
+                payload[key] = getattr(record, key)
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _configure_logging() -> None:
+    level = getattr(logging, settings.log_level, logging.INFO)
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+    formatter: logging.Formatter
+    if settings.json_logs:
+        formatter = JsonLogFormatter()
+    else:
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    for handler in root.handlers:
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
+
 settings = get_settings()
+_configure_logging()
 logger = logging.getLogger("ai_video_studio.api")
 store = ProjectStore(settings)
 pipeline = VideoPipeline(
@@ -963,6 +998,10 @@ def diagnostics() -> dict:
         "rate_limit_requests_per_minute": settings.rate_limit_requests_per_minute,
         "max_request_body_bytes": settings.max_request_body_bytes,
         "cors_origins": settings.cors_origins,
+        "logging": {
+            "level": settings.log_level,
+            "json_logs": settings.json_logs,
+        },
         "browser_screenshots": {
             "enabled": settings.enable_browser_screenshots,
             "allow_private_source_urls": settings.allow_private_source_urls,

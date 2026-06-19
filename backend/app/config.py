@@ -21,6 +21,8 @@ class Settings:
     app_env: str
     data_dir: Path
     public_base_url: str
+    log_level: str
+    json_logs: bool
     ffmpeg_bin: str
     render_width: int
     render_height: int
@@ -148,6 +150,8 @@ def get_settings() -> Settings:
         app_env=os.getenv("APP_ENV", "local"),
         data_dir=data_dir,
         public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000"),
+        log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
+        json_logs=_env_bool("JSON_LOGS", False),
         ffmpeg_bin=os.getenv("FFMPEG_BIN", "ffmpeg"),
         render_width=_env_int("DEFAULT_RENDER_WIDTH", 1920),
         render_height=_env_int("DEFAULT_RENDER_HEIGHT", 1080),
@@ -227,6 +231,8 @@ def get_settings() -> Settings:
 
 
 def validate_settings(settings: Settings) -> None:
+    if settings.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ConfigurationError("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
     if settings.project_storage_backend not in {"local", "postgres"}:
         raise ConfigurationError("PROJECT_STORAGE_BACKEND must be either 'local' or 'postgres'")
     if settings.project_storage_backend == "postgres" and not settings.database_url:
