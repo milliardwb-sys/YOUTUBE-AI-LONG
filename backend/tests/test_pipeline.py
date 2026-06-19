@@ -41,6 +41,7 @@ def make_settings(tmp_path: Path) -> Settings:
         database_url=None,
         database_connect_timeout_seconds=10,
         database_auto_migrate=True,
+        audit_storage_backend="local",
         enable_browser_screenshots=False,
         browser_timeout_ms=1000,
         default_script_provider="template",
@@ -363,6 +364,16 @@ def test_job_store_reports_local_backend(tmp_path):
     assert job_store.health() is True
 
 
+def test_audit_log_reports_local_backend(tmp_path):
+    from app.services.audit_log_service import AuditLogService
+
+    settings = make_settings(tmp_path)
+    audit_log = AuditLogService(settings)
+
+    assert audit_log.metadata()["backend"] == "local"
+    assert audit_log.metadata()["events_dir"].endswith("/_audit")
+
+
 def test_inline_job_runner_generate_all(tmp_path):
     settings = make_settings(tmp_path)
     store = ProjectStore(settings)
@@ -571,6 +582,23 @@ def test_get_settings_rejects_unknown_job_storage_backend(tmp_path, monkeypatch)
 def test_get_settings_requires_database_url_for_postgres_job_storage(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JOB_STORAGE_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
+
+
+def test_get_settings_rejects_unknown_audit_storage_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AUDIT_STORAGE_BACKEND", "sqlite")
+
+    with pytest.raises(ConfigurationError, match="AUDIT_STORAGE_BACKEND"):
+        get_settings()
+
+
+def test_get_settings_requires_database_url_for_postgres_audit_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("AUDIT_STORAGE_BACKEND", "postgres")
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="DATABASE_URL"):

@@ -968,6 +968,7 @@ def diagnostics() -> dict:
             "voice_default": settings.default_voice_provider,
         },
         "billing": billing_service.metadata(),
+        "audit": audit_log.metadata(),
         "auth": {
             "user_auth_enabled": settings.enable_user_auth,
             "oidc": oidc_service.metadata(),
@@ -1293,6 +1294,7 @@ def providers() -> dict:
         "project_storage": store.metadata(),
         "artifacts": artifact_store.metadata(),
         "billing": billing_service.metadata(),
+        "audit": audit_log.metadata(),
         "auth": {
             "user_auth_enabled": settings.enable_user_auth,
             "oidc": oidc_service.metadata(),
@@ -1352,6 +1354,10 @@ def admin_overview(request: Request) -> dict:
         "billing": {
             "metadata": billing_service.metadata(),
             "account_count": len(billing_service.list_accounts()),
+        },
+        "audit": {
+            "metadata": audit_log.metadata(),
+            "event_count": len(audit_log.list_events()),
         },
         "audit_events": len(audit_log.list_events()),
     }

@@ -23,11 +23,16 @@ class AuditEvent:
 
 
 class AuditLogService:
-    """Append-only local audit log for MVP user and project actions."""
+    """Append-only audit log for user, admin, billing, and project actions."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.events_dir = ensure_dir(settings.data_dir / "_audit")
+        self._postgres = None
+        if settings.audit_storage_backend == "postgres":
+            from app.postgres_audit_store import PostgresAuditRepository
+
+            self._postgres = PostgresAuditRepository(settings)
 
     def record(
         self,
@@ -49,6 +54,13 @@ class AuditLogService:
             metadata=metadata or {},
             created_at=datetime.now(timezone.utc),
         )
+        self.save_event(event)
+        return event
+
+    def save_event(self, event: AuditEvent) -> AuditEvent:
+        if self._postgres is not None:
+            self._postgres.save(event)
+            return event
         write_json(self._event_file(event), self._event_to_json(event))
         return event
 
@@ -59,6 +71,12 @@ class AuditLogService:
         resource_type: str | None = None,
         resource_id: str | None = None,
     ) -> list[AuditEvent]:
+        if self._postgres is not None:
+            return self._postgres.list_events(
+                actor_id=actor_id,
+                resource_type=resource_type,
+                resource_id=resource_id,
+            )
         events: list[AuditEvent] = []
         for event_file in sorted(self.events_dir.glob("audit_*.json")):
             try:
@@ -77,6 +95,8 @@ class AuditLogService:
     def cleanup_old_events(self, retention_days: int | None = None) -> dict[str, int]:
         retention = retention_days if retention_days is not None else self.settings.cleanup_retention_days
         cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, retention))
+        if self._postgres is not None:
+            return self._postgres.cleanup_old_events(cutoff)
         removed = 0
         skipped = 0
         for event_file in sorted(self.events_dir.glob("audit_*.json")):
@@ -91,6 +111,14 @@ class AuditLogService:
             event_file.unlink(missing_ok=True)
             removed += 1
         return {"removed_audit_events": removed, "skipped_audit_events": skipped}
+
+    def metadata(self) -> dict[str, object]:
+        if self._postgres is not None:
+            return self._postgres.metadata()
+        return {
+            "backend": "local",
+            "events_dir": self.events_dir.as_posix(),
+        }
 
     def _event_file(self, event: AuditEvent) -> Path:
         return self.events_dir / f"{event.id}.json"
