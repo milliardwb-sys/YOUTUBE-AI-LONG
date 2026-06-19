@@ -13,6 +13,7 @@ backend/data/projects/*
 *.mp4
 *.wav
 *.png
+!landing/assets/*.png
 *.jsonl
 
 # Node / mobile
