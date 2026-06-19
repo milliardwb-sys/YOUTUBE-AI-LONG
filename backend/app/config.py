@@ -57,6 +57,13 @@ class Settings:
     search_result_count: int
     artifact_storage_backend: str
     artifact_url_ttl_seconds: int
+    s3_bucket: str | None
+    s3_region: str | None
+    s3_endpoint_url: str | None
+    s3_access_key_id: str | None
+    s3_secret_access_key: str | None
+    s3_prefix: str
+    s3_public_base_url: str | None
     cleanup_retention_days: int
     render_timeout_seconds: int
     max_request_body_bytes: int
@@ -161,6 +168,13 @@ def get_settings() -> Settings:
         search_result_count=max(0, min(10, _env_int("SEARCH_RESULT_COUNT", 3))),
         artifact_storage_backend=os.getenv("ARTIFACT_STORAGE_BACKEND", "local").strip().lower(),
         artifact_url_ttl_seconds=max(60, _env_int("ARTIFACT_URL_TTL_SECONDS", 3600)),
+        s3_bucket=_env_optional("S3_BUCKET"),
+        s3_region=_env_optional("S3_REGION"),
+        s3_endpoint_url=_env_optional("S3_ENDPOINT_URL"),
+        s3_access_key_id=_env_optional("S3_ACCESS_KEY_ID"),
+        s3_secret_access_key=_env_optional("S3_SECRET_ACCESS_KEY"),
+        s3_prefix=os.getenv("S3_PREFIX", "ai-video-studio").strip().strip("/"),
+        s3_public_base_url=_env_optional("S3_PUBLIC_BASE_URL"),
         cleanup_retention_days=_env_int("CLEANUP_RETENTION_DAYS", 14),
         render_timeout_seconds=max(1, _env_int("RENDER_TIMEOUT_SECONDS", 1800)),
         max_request_body_bytes=max(0, _env_int("MAX_REQUEST_BODY_BYTES", 2_000_000)),
@@ -183,6 +197,12 @@ def validate_settings(settings: Settings) -> None:
         raise ConfigurationError("JOB_STORAGE_BACKEND must be either 'local' or 'postgres'")
     if settings.job_storage_backend == "postgres" and not settings.database_url:
         raise ConfigurationError("DATABASE_URL is required when JOB_STORAGE_BACKEND=postgres")
+    if settings.artifact_storage_backend not in {"local", "s3"}:
+        raise ConfigurationError("ARTIFACT_STORAGE_BACKEND must be either 'local' or 's3'")
+    if settings.artifact_storage_backend == "s3" and not settings.s3_bucket:
+        raise ConfigurationError("S3_BUCKET is required when ARTIFACT_STORAGE_BACKEND=s3")
+    if bool(settings.s3_access_key_id) != bool(settings.s3_secret_access_key):
+        raise ConfigurationError("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together")
     if settings.app_env in LOCAL_ENVS or not settings.api_key:
         return
     if settings.api_key in WEAK_PRODUCTION_API_KEYS:

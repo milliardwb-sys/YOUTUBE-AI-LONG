@@ -68,6 +68,13 @@ def make_settings(tmp_path: Path) -> Settings:
         search_result_count=3,
         artifact_storage_backend="local",
         artifact_url_ttl_seconds=3600,
+        s3_bucket=None,
+        s3_region=None,
+        s3_endpoint_url=None,
+        s3_access_key_id=None,
+        s3_secret_access_key=None,
+        s3_prefix="ai-video-studio",
+        s3_public_base_url=None,
         cleanup_retention_days=14,
         render_timeout_seconds=1800,
         max_request_body_bytes=2_000_000,
@@ -439,6 +446,62 @@ def test_artifact_store_public_url_entry_and_escape_guard(tmp_path):
         artifact_store.resolve_artifact_path(str(outside_path))
 
 
+def test_s3_artifact_store_uploads_and_presigns(tmp_path, monkeypatch):
+    from app.services import artifact_store as artifact_store_module
+    from app.services.artifact_store import ArtifactStore
+
+    class FakeS3Client:
+        def __init__(self):
+            self.uploads = []
+
+        def upload_file(self, filename, bucket, key, ExtraArgs=None):
+            self.uploads.append((filename, bucket, key, ExtraArgs))
+
+        def head_object(self, Bucket, Key):
+            return {"ContentLength": 2}
+
+        def generate_presigned_url(self, operation, Params, ExpiresIn):
+            return f"https://signed.example/{Params['Bucket']}/{Params['Key']}?ttl={ExpiresIn}"
+
+    class FakeBoto3:
+        def __init__(self, client):
+            self.client_instance = client
+
+        def client(self, *args, **kwargs):
+            return self.client_instance
+
+    fake_client = FakeS3Client()
+    monkeypatch.setattr(artifact_store_module, "boto3", FakeBoto3(fake_client))
+    settings = Settings(
+        **{
+            **make_settings(tmp_path / "data").__dict__,
+            "artifact_storage_backend": "s3",
+            "artifact_url_ttl_seconds": 120,
+            "s3_bucket": "studio-artifacts",
+            "s3_region": "auto",
+            "s3_endpoint_url": "https://r2.example",
+            "s3_access_key_id": "key",
+            "s3_secret_access_key": "secret",
+            "s3_prefix": "tenant-a",
+        }
+    )
+    artifact_path = settings.data_dir / "project_aaaaaaaaaaaa" / "exports" / "result.txt"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("ok", encoding="utf-8")
+
+    artifact_store = ArtifactStore(settings)
+    entry = artifact_store.entry("result_path", str(artifact_path))
+
+    assert entry["exists"] is True
+    assert entry["size_bytes"] == 2
+    assert entry["storage_backend"] == "s3"
+    assert entry["object_key"] == "tenant-a/project_aaaaaaaaaaaa/exports/result.txt"
+    assert entry["url"] == "https://signed.example/studio-artifacts/tenant-a/project_aaaaaaaaaaaa/exports/result.txt?ttl=120"
+    assert fake_client.uploads[0][1] == "studio-artifacts"
+    assert fake_client.uploads[0][2] == "tenant-a/project_aaaaaaaaaaaa/exports/result.txt"
+    assert artifact_store.metadata()["signed_urls"] is True
+
+
 def test_get_settings_parses_openai_temperature(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("OPENAI_TEMPERATURE", "0.2")
@@ -494,6 +557,25 @@ def test_get_settings_requires_database_url_for_postgres_job_storage(tmp_path, m
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
+
+
+def test_get_settings_requires_bucket_for_s3_artifact_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "s3")
+    monkeypatch.delenv("S3_BUCKET", raising=False)
+
+    with pytest.raises(ConfigurationError, match="S3_BUCKET"):
+        get_settings()
+
+
+def test_get_settings_requires_s3_access_key_pair(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ARTIFACT_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("S3_ACCESS_KEY_ID", "key")
+    monkeypatch.delenv("S3_SECRET_ACCESS_KEY", raising=False)
+
+    with pytest.raises(ConfigurationError, match="S3_ACCESS_KEY_ID"):
         get_settings()
 
 
