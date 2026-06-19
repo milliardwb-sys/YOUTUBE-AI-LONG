@@ -1394,6 +1394,10 @@ def test_observability_metrics_collects_requests(tmp_path, monkeypatch):
     assert metrics["total_requests"] >= 1
     assert metrics["by_status"]["200"] >= 1
     assert metrics["by_path"]["GET /health"] >= 1
+    prometheus = client.get("/observability/metrics/prometheus")
+    assert prometheus.status_code == 200
+    assert "ai_video_studio_requests_total" in prometheus.text
+    assert 'ai_video_studio_requests_by_status_total{status="200"}' in prometheus.text
 
 
 def test_api_project_manifest_reports_readiness_and_missing_artifacts(tmp_path, monkeypatch):

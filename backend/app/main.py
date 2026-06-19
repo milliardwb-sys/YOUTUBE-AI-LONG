@@ -237,6 +237,7 @@ def _metrics_snapshot() -> dict:
         return {
             "uptime_seconds": int(time.time() - app_started_at),
             "total_requests": total,
+            "total_elapsed_ms": total_elapsed,
             "average_elapsed_ms": round(total_elapsed / total, 2) if total else 0,
             "max_elapsed_ms": int(request_metrics["max_elapsed_ms"]),
             "by_status": by_status,
@@ -971,6 +972,56 @@ def observability_metrics() -> dict:
         "version": "0.4.0",
         "metrics": _metrics_snapshot(),
     }
+
+
+@app.get("/observability/metrics/prometheus")
+def observability_prometheus_metrics() -> Response:
+    metrics = _metrics_snapshot()
+    store_stats = store.stats()
+    jobs = job_store.stats()
+    usage = usage_service.summary()
+    lines = [
+        "# HELP ai_video_studio_requests_total Total HTTP requests handled by the API.",
+        "# TYPE ai_video_studio_requests_total counter",
+        f"ai_video_studio_requests_total {int(metrics['total_requests'])}",
+        "# HELP ai_video_studio_request_elapsed_ms_sum Total observed request latency in milliseconds.",
+        "# TYPE ai_video_studio_request_elapsed_ms_sum counter",
+        f"ai_video_studio_request_elapsed_ms_sum {int(metrics['total_elapsed_ms'])}",
+        "# HELP ai_video_studio_request_elapsed_ms_max Max observed request latency in milliseconds.",
+        "# TYPE ai_video_studio_request_elapsed_ms_max gauge",
+        f"ai_video_studio_request_elapsed_ms_max {int(metrics['max_elapsed_ms'])}",
+        "# HELP ai_video_studio_projects_total Project count by status.",
+        "# TYPE ai_video_studio_projects_total gauge",
+        f"ai_video_studio_projects_total {int(store_stats['project_count'])}",
+        "# HELP ai_video_studio_jobs_total Job count by status.",
+        "# TYPE ai_video_studio_jobs_total gauge",
+        f"ai_video_studio_jobs_total {int(jobs['job_count'])}",
+        "# HELP ai_video_studio_usage_events_total Usage ledger event count.",
+        "# TYPE ai_video_studio_usage_events_total gauge",
+        f"ai_video_studio_usage_events_total {int(usage['event_count'])}",
+        "# HELP ai_video_studio_usage_estimated_cost_cents Estimated usage cost in cents.",
+        "# TYPE ai_video_studio_usage_estimated_cost_cents gauge",
+        f"ai_video_studio_usage_estimated_cost_cents {int(usage['estimated_cost_cents'])}",
+    ]
+    by_status = metrics.get("by_status") if isinstance(metrics, dict) else {}
+    if isinstance(by_status, dict):
+        lines.extend(
+            [
+                "# HELP ai_video_studio_requests_by_status_total HTTP requests by response status.",
+                "# TYPE ai_video_studio_requests_by_status_total counter",
+            ]
+        )
+        for status, count in sorted(by_status.items()):
+            lines.append(f'ai_video_studio_requests_by_status_total{{status="{_prometheus_label(status)}"}} {int(count)}')
+    for status, count in sorted(store_stats.get("projects_by_status", {}).items()):
+        lines.append(f'ai_video_studio_projects_by_status{{status="{_prometheus_label(status)}"}} {int(count)}')
+    for status, count in sorted(jobs.get("jobs_by_status", {}).items()):
+        lines.append(f'ai_video_studio_jobs_by_status{{status="{_prometheus_label(status)}"}} {int(count)}')
+    return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
+
+def _prometheus_label(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def _data_dir_is_writable() -> bool:
