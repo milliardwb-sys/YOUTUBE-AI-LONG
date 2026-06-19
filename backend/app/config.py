@@ -45,6 +45,10 @@ class Settings:
     cors_origins: list[str]
     allow_unsafe_http_sources: bool
     allow_private_source_urls: bool
+    search_provider: str
+    brave_search_api_key: str | None
+    brave_search_endpoint: str
+    search_result_count: int
     cleanup_retention_days: int
     render_timeout_seconds: int
     max_request_body_bytes: int
@@ -134,6 +138,13 @@ def get_settings() -> Settings:
         cors_origins=_env_list("CORS_ORIGINS", ["http://localhost:19006", "http://localhost:8081"]),
         allow_unsafe_http_sources=_env_bool("ALLOW_UNSAFE_HTTP_SOURCES", False),
         allow_private_source_urls=_env_bool("ALLOW_PRIVATE_SOURCE_URLS", False),
+        search_provider=os.getenv("SEARCH_PROVIDER", "disabled").strip().lower(),
+        brave_search_api_key=_env_optional("BRAVE_SEARCH_API_KEY"),
+        brave_search_endpoint=os.getenv(
+            "BRAVE_SEARCH_ENDPOINT",
+            "https://api.search.brave.com/res/v1/web/search",
+        ).strip(),
+        search_result_count=max(0, min(10, _env_int("SEARCH_RESULT_COUNT", 3))),
         cleanup_retention_days=_env_int("CLEANUP_RETENTION_DAYS", 14),
         render_timeout_seconds=max(1, _env_int("RENDER_TIMEOUT_SECONDS", 1800)),
         max_request_body_bytes=max(0, _env_int("MAX_REQUEST_BODY_BYTES", 2_000_000)),

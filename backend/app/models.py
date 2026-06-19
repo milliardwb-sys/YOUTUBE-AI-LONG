@@ -42,6 +42,7 @@ class SourceKind(str, Enum):
     official_docs = "official_docs"
     press_kit = "press_kit"
     user_provided = "user_provided"
+    search_result = "search_result"
     ai_generated_fallback = "ai_generated_fallback"
 
 

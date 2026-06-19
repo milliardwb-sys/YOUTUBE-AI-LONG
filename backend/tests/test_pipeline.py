@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import ConfigurationError, Settings, get_settings
-from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, UserCreate, UserSession, VisualMode, VoiceProviderName
+from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, SourceKind, UserCreate, UserSession, VisualMode, VoiceProviderName
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
 from app.services.auth_service import AuthService, SessionNotFoundError
@@ -56,6 +56,10 @@ def make_settings(tmp_path: Path) -> Settings:
         cors_origins=["http://localhost:19006"],
         allow_unsafe_http_sources=False,
         allow_private_source_urls=False,
+        search_provider="disabled",
+        brave_search_api_key=None,
+        brave_search_endpoint="https://api.search.brave.com/res/v1/web/search",
+        search_result_count=3,
         cleanup_retention_days=14,
         render_timeout_seconds=1800,
         max_request_body_bytes=2_000_000,
@@ -112,6 +116,70 @@ def test_official_sources_and_slides(tmp_path):
     assert any(scene.visual_type == "screenshot" for scene in result.scenes)
     assert all(Path(scene.visual_path).exists() for scene in result.scenes)
     assert all(source.screenshot_path and Path(source.screenshot_path).exists() for source in result.sources)
+
+
+def test_source_service_uses_search_provider_results(tmp_path):
+    from app.services.search_provider import SearchResult
+
+    settings = make_settings(tmp_path)
+    settings = Settings(**{**settings.__dict__, "search_result_count": 2})
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="AI video research provider",
+            duration_minutes=1,
+            visual_mode=VisualMode.official_sites_plus_ai,
+        )
+    )
+    service = SourceService(settings)
+
+    class FakeSearchProvider:
+        def search(self, query: str, *, count: int, language: str = "en") -> list[SearchResult]:
+            assert query == "AI video research provider"
+            assert count == 2
+            return [
+                SearchResult(
+                    title="Official Research Result",
+                    url="https://example.com/research",
+                    description="Search result description",
+                )
+            ]
+
+    service.search_provider = FakeSearchProvider()
+    service.search_provider_error = None
+
+    result = service.collect_sources(project, store.project_dir(project.id))
+
+    assert any(source.kind == SourceKind.search_result for source in result.sources)
+    assert any(source.url == "https://example.com/research" for source in result.sources)
+
+
+def test_brave_search_provider_filters_unsafe_results(tmp_path):
+    from app.services.search_provider import BraveSearchProvider
+
+    settings = make_settings(tmp_path)
+    settings = Settings(
+        **{
+            **settings.__dict__,
+            "search_provider": "brave",
+            "brave_search_api_key": "test-token",
+        }
+    )
+    provider = BraveSearchProvider(settings)
+
+    results = provider._parse_results(
+        {
+            "web": {
+                "results": [
+                    {"title": "Safe", "url": "https://example.com/safe", "description": "ok"},
+                    {"title": "Local", "url": "http://127.0.0.1/private", "description": "blocked"},
+                ]
+            }
+        }
+    )
+
+    assert len(results) == 1
+    assert results[0].url == "https://example.com/safe"
 
 
 def test_scene_patch_recalculates_timings(tmp_path):

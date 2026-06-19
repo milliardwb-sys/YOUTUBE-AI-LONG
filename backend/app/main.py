@@ -1154,6 +1154,11 @@ def providers() -> dict:
             "browser_enabled": settings.enable_browser_screenshots,
             "timeout_ms": settings.browser_timeout_ms,
         },
+        "search": {
+            "provider": settings.search_provider,
+            "brave_configured": bool(settings.brave_search_api_key),
+            "result_count": settings.search_result_count,
+        },
         "jobs": {
             "available": [item.value for item in JobType],
             "run_inline": settings.run_jobs_inline,

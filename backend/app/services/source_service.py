@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from app.config import Settings
 from app.models import Project, ProjectStatus, SourceCandidate, SourceKind, VisualMode
+from app.services.search_provider import DisabledSearchProvider, SearchProviderUnavailable, make_search_provider
 from app.services.screenshot_service import ScreenshotService
 from app.utils.files import ensure_dir
 from app.utils.security import UnsafeUrlError, validate_source_url
@@ -23,6 +24,13 @@ class SourceService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.screenshots = ScreenshotService(settings)
+        try:
+            self.search_provider = make_search_provider(settings)
+        except SearchProviderUnavailable as exc:
+            self.search_provider = DisabledSearchProvider()
+            self.search_provider_error = str(exc)
+        else:
+            self.search_provider_error = None
 
     def collect_sources(self, project: Project, project_dir: Path) -> Project:
         project.status = ProjectStatus.researching
@@ -33,7 +41,7 @@ class SourceService:
             project.touch("sources_skipped")
             return project
 
-        candidates = self._user_sources(project) + self._curated_sources(project)
+        candidates = self._user_sources(project) + self._search_sources(project) + self._curated_sources(project)
         candidates = self._dedupe_sources(candidates)[:8]
         assets_dir = ensure_dir(project_dir / "assets" / "sources")
 
@@ -67,6 +75,36 @@ class SourceService:
                 )
             )
         return sources
+
+    def _search_sources(self, project: Project) -> list[SourceCandidate]:
+        if self.settings.search_result_count <= 0:
+            return []
+        if self.search_provider_error:
+            warning = f"Search provider disabled: {self.search_provider_error}"
+            if warning not in project.result.warnings:
+                project.result.warnings.append(warning)
+            return []
+        try:
+            results = self.search_provider.search(
+                project.topic,
+                count=self.settings.search_result_count,
+                language=project.language,
+            )
+        except Exception as exc:  # noqa: BLE001 - search must never break local generation
+            warning = f"Search provider failed; curated sources were used: {exc}"
+            if warning not in project.result.warnings:
+                project.result.warnings.append(warning)
+            return []
+        return [
+            SourceCandidate(
+                name=result.title,
+                url=result.url,
+                kind=SourceKind.search_result,
+                license_note="Search provider result; verify source terms, rights, and factual accuracy before publication.",
+                reason=result.description or "Search provider result for the project topic.",
+            )
+            for result in results
+        ]
 
     def _curated_sources(self, project: Project) -> list[SourceCandidate]:
         text = f"{project.topic} {project.audience}".lower()
