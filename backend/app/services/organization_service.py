@@ -73,6 +73,17 @@ class OrganizationService:
                 continue
         return sorted(organizations, key=lambda item: (item.created_at, item.id), reverse=True)
 
+    def list_all(self) -> list[Organization]:
+        organizations: list[Organization] = []
+        for path in sorted(self.organizations_dir.glob("org_*.json")):
+            try:
+                organization = Organization.model_validate(read_json(path))
+            except Exception:
+                continue
+            if not organization.disabled:
+                organizations.append(organization)
+        return sorted(organizations, key=lambda item: (item.created_at, item.id), reverse=True)
+
     def list_members_for_user(self, user_id: str) -> list[OrganizationMember]:
         validate_user_id(user_id)
         members: list[OrganizationMember] = []

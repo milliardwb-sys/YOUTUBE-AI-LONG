@@ -39,6 +39,7 @@ class Settings:
     run_jobs_inline: bool
     job_workers: int
     api_key: str | None
+    admin_api_key: str | None
     enable_user_auth: bool
     access_token_ttl_minutes: int
     rate_limit_requests_per_minute: int
@@ -134,6 +135,7 @@ def get_settings() -> Settings:
         run_jobs_inline=_env_bool("RUN_JOBS_INLINE", False),
         job_workers=_env_int("JOB_WORKERS", 2),
         api_key=_env_optional("API_KEY"),
+        admin_api_key=_env_optional("ADMIN_API_KEY"),
         enable_user_auth=_env_bool("ENABLE_USER_AUTH", False),
         access_token_ttl_minutes=max(5, _env_int("ACCESS_TOKEN_TTL_MINUTES", 1440)),
         rate_limit_requests_per_minute=_env_int("RATE_LIMIT_REQUESTS_PER_MINUTE", 0),

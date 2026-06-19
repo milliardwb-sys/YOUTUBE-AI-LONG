@@ -50,6 +50,7 @@ def make_settings(tmp_path: Path) -> Settings:
         run_jobs_inline=True,
         job_workers=1,
         api_key=None,
+        admin_api_key=None,
         enable_user_auth=False,
         access_token_ttl_minutes=1440,
         rate_limit_requests_per_minute=0,
@@ -1052,6 +1053,61 @@ def test_api_stats_endpoint(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["storage"]["project_count"] == 1
     assert payload["jobs"]["job_count"] == 0
+
+
+def test_admin_routes_require_admin_key_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ADMIN_API_KEY", "local-admin-secret")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    missing = client.get("/admin/overview")
+    wrong = client.get("/admin/overview", headers={"X-Admin-Key": "wrong"})
+    ok = client.get("/admin/overview", headers={"X-Admin-Key": "local-admin-secret"})
+
+    assert missing.status_code == 401
+    assert wrong.status_code == 401
+    assert ok.status_code == 200
+    assert ok.json()["users"]["count"] == 0
+
+
+def test_admin_projects_and_users_cross_user_boundaries(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("ADMIN_API_KEY", "local-admin-secret")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    alice = client.post(
+        "/auth/register",
+        json={"email": "admin-alice@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    bob = client.post(
+        "/auth/register",
+        json={"email": "admin-bob@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    alice_headers = {"Authorization": f"Bearer {alice}"}
+    bob_headers = {"Authorization": f"Bearer {bob}"}
+
+    alice_project = client.post("/projects", json={"topic": "Admin Alice project"}, headers=alice_headers)
+    bob_project = client.post("/projects", json={"topic": "Admin Bob project"}, headers=bob_headers)
+    admin_headers = {"X-Admin-Key": "local-admin-secret"}
+    projects = client.get("/admin/projects", headers=admin_headers)
+    users = client.get("/admin/users", headers=admin_headers)
+
+    assert alice_project.status_code == 200
+    assert bob_project.status_code == 200
+    assert projects.status_code == 200
+    assert projects.headers["x-total-count"] == "2"
+    assert {project["id"] for project in projects.json()} == {alice_project.json()["id"], bob_project.json()["id"]}
+    assert users.status_code == 200
+    assert users.headers["x-total-count"] == "2"
 
 
 def test_observability_metrics_collects_requests(tmp_path, monkeypatch):

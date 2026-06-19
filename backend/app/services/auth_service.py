@@ -132,6 +132,15 @@ class AuthService:
                 return user
         return None
 
+    def list_users(self) -> list[PlatformUser]:
+        users: list[PlatformUser] = []
+        for path in sorted(self.users_dir.glob("user_*.json")):
+            try:
+                users.append(PlatformUser.model_validate(read_json(path)))
+            except Exception:
+                continue
+        return sorted(users, key=lambda item: (item.created_at, item.id), reverse=True)
+
     def _user_file(self, user_id: str) -> Path:
         return self.users_dir / f"{user_id}.json"
 

@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from app.config import get_settings
+from app.config import LOCAL_ENVS, get_settings
 from app.models import (
     ConsentCreate,
     ConsentType,
@@ -306,6 +306,15 @@ def _check_rate_limit(request: Request) -> dict[str, str] | None:
 
 def _auth_enabled() -> bool:
     return settings.enable_user_auth
+
+
+def _require_admin(request: Request) -> None:
+    if settings.admin_api_key:
+        if request.headers.get("x-admin-key") != settings.admin_api_key:
+            raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Key")
+        return
+    if settings.app_env not in LOCAL_ENVS:
+        raise HTTPException(status_code=403, detail="ADMIN_API_KEY must be configured for admin routes")
 
 
 def _bearer_token(request: Request) -> str | None:
@@ -1156,6 +1165,120 @@ def stats() -> dict:
         "artifacts": artifact_store.metadata(),
         "jobs": job_store.stats(),
     }
+
+
+def _admin_user_payload(user: PlatformUser) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "disabled": user.disabled,
+        "created_at": user.created_at.isoformat(),
+        "updated_at": user.updated_at.isoformat(),
+    }
+
+
+@app.get("/admin/overview")
+def admin_overview(request: Request) -> dict:
+    _require_admin(request)
+    users = auth_service.list_users()
+    organizations = organization_service.list_all()
+    return {
+        "status": "ok",
+        "version": "0.4.0",
+        "env": settings.app_env,
+        "users": {
+            "count": len(users),
+            "disabled": sum(1 for user in users if user.disabled),
+        },
+        "organizations": {
+            "count": len(organizations),
+        },
+        "storage": store.stats(),
+        "artifacts": artifact_store.metadata(),
+        "jobs": job_store.stats(),
+        "usage": usage_service.summary(),
+        "audit_events": len(audit_log.list_events()),
+    }
+
+
+@app.get("/admin/users")
+def admin_users(
+    request: Request,
+    response: Response,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    _require_admin(request)
+    users = auth_service.list_users()
+    _set_pagination_headers(response, total=len(users), limit=limit, offset=offset)
+    return [_admin_user_payload(user) for user in users[offset : offset + limit]]
+
+
+@app.get("/admin/projects")
+def admin_projects(
+    request: Request,
+    response: Response,
+    owner_id: str | None = None,
+    status: ProjectStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    _require_admin(request)
+    projects = store.list_projects(owner_id=owner_id)
+    if status is not None:
+        projects = [project for project in projects if project.status == status]
+    _set_pagination_headers(response, total=len(projects), limit=limit, offset=offset)
+    return [_with_file_urls(project) for project in projects[offset : offset + limit]]
+
+
+@app.get("/admin/jobs")
+def admin_jobs(
+    request: Request,
+    response: Response,
+    status: JobStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    _require_admin(request)
+    jobs = job_store.list_all()
+    if status is not None:
+        jobs = [job for job in jobs if job.status == status]
+    _set_pagination_headers(response, total=len(jobs), limit=limit, offset=offset)
+    return [job.model_dump(mode="json") for job in jobs[offset : offset + limit]]
+
+
+@app.get("/admin/audit/events")
+def admin_audit_events(
+    request: Request,
+    response: Response,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    _require_admin(request)
+    events = audit_log.list_events(resource_type=resource_type, resource_id=resource_id)
+    _set_pagination_headers(response, total=len(events), limit=limit, offset=offset)
+    return [
+        {
+            "id": event.id,
+            "action": event.action,
+            "actor_id": event.actor_id,
+            "resource_type": event.resource_type,
+            "resource_id": event.resource_id,
+            "request_id": event.request_id,
+            "metadata": event.metadata,
+            "created_at": event.created_at.isoformat(),
+        }
+        for event in events[offset : offset + limit]
+    ]
+
+
+@app.get("/admin/usage")
+def admin_usage(request: Request) -> dict:
+    _require_admin(request)
+    return usage_service.summary()
 
 
 @app.post("/maintenance/cleanup")
