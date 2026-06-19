@@ -36,6 +36,10 @@ def make_settings(tmp_path: Path) -> Settings:
         render_width=1920,
         render_height=1080,
         render_fps=15,
+        project_storage_backend="local",
+        database_url=None,
+        database_connect_timeout_seconds=10,
+        database_auto_migrate=True,
         enable_browser_screenshots=False,
         browser_timeout_ms=1000,
         default_script_provider="template",
@@ -308,12 +312,21 @@ def test_project_and_job_stats(tmp_path):
     job_stats = job_store.stats()
 
     assert project_stats["project_count"] == 1
+    assert project_stats["storage_backend"] == "local"
     assert project_stats["projects_by_status"]["draft"] == 1
     assert project_stats["storage_files"] >= 2
     assert job_stats["job_count"] == 1
     assert job_stats["terminal_jobs"] == 1
     assert job_stats["jobs_by_status"]["cancelled"] == 1
     assert job_stats["jobs_by_type"]["generate_script"] == 1
+
+
+def test_project_store_reports_local_backend(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+
+    assert store.metadata()["backend"] == "local"
+    assert store.health() is True
 
 
 def test_inline_job_runner_generate_all(tmp_path):
@@ -438,6 +451,23 @@ def test_get_settings_parses_rate_limit(tmp_path, monkeypatch):
     settings = get_settings()
 
     assert settings.rate_limit_requests_per_minute == 12
+
+
+def test_get_settings_rejects_unknown_project_storage_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PROJECT_STORAGE_BACKEND", "sqlite")
+
+    with pytest.raises(ConfigurationError, match="PROJECT_STORAGE_BACKEND"):
+        get_settings()
+
+
+def test_get_settings_requires_database_url_for_postgres_storage(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PROJECT_STORAGE_BACKEND", "postgres")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        get_settings()
 
 
 def test_get_settings_rejects_weak_production_api_key(tmp_path, monkeypatch):
@@ -1228,7 +1258,9 @@ def test_production_requires_api_key_for_private_routes(tmp_path, monkeypatch):
     client = TestClient(main.app)
 
     assert client.get("/health").status_code == 200
-    assert client.get("/providers").status_code == 200
+    providers = client.get("/providers")
+    assert providers.status_code == 200
+    assert providers.json()["project_storage"]["backend"] == "local"
     response = client.get("/projects")
 
     assert response.status_code == 403

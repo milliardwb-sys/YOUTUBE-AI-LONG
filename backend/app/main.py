@@ -890,10 +890,13 @@ def health() -> dict[str, str | bool | int]:
 def ready() -> dict[str, str | bool]:
     ffmpeg_available = bool(pipeline.render_service.resolve_ffmpeg_bin())
     data_dir_writable = _data_dir_is_writable()
+    project_storage_available = store.health()
     return {
-        "status": "ready" if ffmpeg_available and data_dir_writable else "not_ready",
+        "status": "ready" if ffmpeg_available and data_dir_writable and project_storage_available else "not_ready",
         "ffmpeg_available": ffmpeg_available,
         "data_dir_writable": data_dir_writable,
+        "project_storage_backend": settings.project_storage_backend,
+        "project_storage_available": project_storage_available,
     }
 
 
@@ -909,6 +912,7 @@ def diagnostics() -> dict:
             "exists": settings.data_dir.exists(),
             "writable": _data_dir_is_writable(),
         },
+        "project_storage": store.metadata(),
         "ffmpeg": {
             "configured": settings.ffmpeg_bin,
             "resolved": ffmpeg_bin,
@@ -1146,6 +1150,7 @@ def providers() -> dict:
             "brave_configured": bool(settings.brave_search_api_key),
             "result_count": settings.search_result_count,
         },
+        "project_storage": store.metadata(),
         "artifacts": artifact_store.metadata(),
         "jobs": {
             "available": [item.value for item in JobType],

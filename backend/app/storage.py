@@ -19,6 +19,7 @@ from app.models import (
     ScriptProviderName,
     VoiceProviderName,
 )
+from app.postgres_project_store import PostgresProjectRepository
 from app.utils.files import ensure_dir, read_json, write_json
 from app.utils.security import ensure_within_directory, validate_project_id, validate_scene_id
 
@@ -38,7 +39,10 @@ class InvalidSceneOrderError(ValueError):
 class ProjectStore:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._postgres: PostgresProjectRepository | None = None
         ensure_dir(settings.data_dir)
+        if settings.project_storage_backend == "postgres":
+            self._postgres = PostgresProjectRepository(settings)
 
     def project_dir(self, project_id: str) -> Path:
         validate_project_id(project_id)
@@ -237,21 +241,36 @@ class ProjectStore:
 
     def delete_project(self, project_id: str) -> None:
         project_dir = self.project_dir(project_id)
+        if self._postgres is not None:
+            if not self._postgres.delete(project_id):
+                raise ProjectNotFoundError(project_id)
+            shutil.rmtree(project_dir, ignore_errors=True)
+            return
         if not self.project_file(project_id).exists():
             raise ProjectNotFoundError(project_id)
         shutil.rmtree(project_dir, ignore_errors=True)
 
     def save(self, project: Project) -> None:
         project.touch()
+        if self._postgres is not None:
+            self._postgres.save(project)
+            return
         write_json(self.project_file(project.id), project.model_dump(mode="json"))
 
     def get(self, project_id: str) -> Project:
+        if self._postgres is not None:
+            project = self._postgres.get(project_id)
+            if project is None:
+                raise ProjectNotFoundError(project_id)
+            return project
         path = self.project_file(project_id)
         if not path.exists():
             raise ProjectNotFoundError(project_id)
         return Project.model_validate(read_json(path))
 
     def list_projects(self, *, owner_id: str | None = None) -> list[Project]:
+        if self._postgres is not None:
+            return self._postgres.list_projects(owner_id=owner_id)
         projects: list[Project] = []
         for project_file in sorted(self.settings.data_dir.glob("project_*/project.json")):
             project = Project.model_validate(read_json(project_file))
@@ -292,11 +311,25 @@ class ProjectStore:
                     except OSError:
                         continue
         return {
+            "storage_backend": self.settings.project_storage_backend,
             "project_count": len(projects),
             "projects_by_status": by_status,
             "storage_files": total_files,
             "storage_bytes": total_bytes,
         }
+
+    def metadata(self) -> dict[str, object]:
+        if self._postgres is not None:
+            return self._postgres.metadata()
+        return {
+            "backend": "local",
+            "data_dir": self.settings.data_dir.as_posix(),
+        }
+
+    def health(self) -> bool:
+        if self._postgres is not None:
+            return self._postgres.ping()
+        return self.settings.data_dir.exists()
 
     def _resolve_insert_order(self, project: Project, payload: SceneCreate) -> int:
         if payload.after_scene_id:

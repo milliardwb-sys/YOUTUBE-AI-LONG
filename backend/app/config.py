@@ -25,6 +25,10 @@ class Settings:
     render_width: int
     render_height: int
     render_fps: int
+    project_storage_backend: str
+    database_url: str | None
+    database_connect_timeout_seconds: int
+    database_auto_migrate: bool
     enable_browser_screenshots: bool
     browser_timeout_ms: int
     default_script_provider: str
@@ -121,6 +125,10 @@ def get_settings() -> Settings:
         render_width=_env_int("DEFAULT_RENDER_WIDTH", 1920),
         render_height=_env_int("DEFAULT_RENDER_HEIGHT", 1080),
         render_fps=_env_int("DEFAULT_RENDER_FPS", 30),
+        project_storage_backend=os.getenv("PROJECT_STORAGE_BACKEND", "local").strip().lower(),
+        database_url=_env_optional("DATABASE_URL"),
+        database_connect_timeout_seconds=max(1, _env_int("DATABASE_CONNECT_TIMEOUT_SECONDS", 10)),
+        database_auto_migrate=_env_bool("DATABASE_AUTO_MIGRATE", True),
         enable_browser_screenshots=_env_bool("ENABLE_BROWSER_SCREENSHOTS", False),
         browser_timeout_ms=_env_int("BROWSER_SCREENSHOT_TIMEOUT_MS", 12000),
         default_script_provider=os.getenv("DEFAULT_SCRIPT_PROVIDER", "template").strip().lower(),
@@ -165,6 +173,10 @@ def get_settings() -> Settings:
 
 
 def validate_settings(settings: Settings) -> None:
+    if settings.project_storage_backend not in {"local", "postgres"}:
+        raise ConfigurationError("PROJECT_STORAGE_BACKEND must be either 'local' or 'postgres'")
+    if settings.project_storage_backend == "postgres" and not settings.database_url:
+        raise ConfigurationError("DATABASE_URL is required when PROJECT_STORAGE_BACKEND=postgres")
     if settings.app_env in LOCAL_ENVS or not settings.api_key:
         return
     if settings.api_key in WEAK_PRODUCTION_API_KEYS:
