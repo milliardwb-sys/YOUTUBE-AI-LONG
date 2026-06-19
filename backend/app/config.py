@@ -49,6 +49,8 @@ class Settings:
     brave_search_api_key: str | None
     brave_search_endpoint: str
     search_result_count: int
+    artifact_storage_backend: str
+    artifact_url_ttl_seconds: int
     cleanup_retention_days: int
     render_timeout_seconds: int
     max_request_body_bytes: int
@@ -145,6 +147,8 @@ def get_settings() -> Settings:
             "https://api.search.brave.com/res/v1/web/search",
         ).strip(),
         search_result_count=max(0, min(10, _env_int("SEARCH_RESULT_COUNT", 3))),
+        artifact_storage_backend=os.getenv("ARTIFACT_STORAGE_BACKEND", "local").strip().lower(),
+        artifact_url_ttl_seconds=max(60, _env_int("ARTIFACT_URL_TTL_SECONDS", 3600)),
         cleanup_retention_days=_env_int("CLEANUP_RETENTION_DAYS", 14),
         render_timeout_seconds=max(1, _env_int("RENDER_TIMEOUT_SECONDS", 1800)),
         max_request_body_bytes=max(0, _env_int("MAX_REQUEST_BODY_BYTES", 2_000_000)),

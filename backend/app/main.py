@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
@@ -44,6 +43,7 @@ from app.services.auth_service import (
     UserAlreadyExistsError,
 )
 from app.services.audit_log_service import AuditLogService
+from app.services.artifact_store import ArtifactStore
 from app.services.backup_service import BackupNotFoundError, BackupService, InvalidBackupError
 from app.services.compliance_service import ComplianceService
 from app.services.consent_service import ConsentService
@@ -68,7 +68,7 @@ from app.services.visual_service import VisualService
 from app.services.voice_service import VoiceService
 from app.storage import InvalidSceneOrderError, ProjectNotFoundError, ProjectStore, SceneNotFoundError
 from app.models import ProjectStatus
-from app.utils.security import InvalidIdentifierError, UnsafePathError, ensure_within_directory, validate_organization_id, validate_user_id
+from app.utils.security import InvalidIdentifierError, UnsafePathError, validate_organization_id, validate_user_id
 
 settings = get_settings()
 logger = logging.getLogger("ai_video_studio.api")
@@ -92,6 +92,7 @@ usage_service = UsageService(settings)
 backup_service = BackupService(settings)
 organization_service = OrganizationService(settings)
 consent_service = ConsentService(settings)
+artifact_store = ArtifactStore(settings)
 app_started_at = time.time()
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
@@ -726,34 +727,11 @@ def _with_file_urls(project: Project) -> dict:
 
 
 def _public_file_url(path_value: str | None) -> str | None:
-    if not path_value:
-        return None
-    try:
-        path = ensure_within_directory(settings.data_dir, Path(path_value))
-        relative = path.relative_to(settings.data_dir)
-    except (OSError, ValueError):
-        return None
-    return f"{settings.public_base_url}/files/{relative.as_posix()}"
+    return artifact_store.public_url(path_value)
 
 
 def _artifact_entry(key: str, path_value: str | None) -> dict:
-    exists = False
-    size_bytes = 0
-    if path_value:
-        try:
-            path = ensure_within_directory(settings.data_dir, Path(path_value))
-            exists = path.is_file()
-            size_bytes = path.stat().st_size if exists else 0
-        except (OSError, ValueError):
-            exists = False
-            size_bytes = 0
-    return {
-        "key": key.replace("_path", ""),
-        "path": path_value,
-        "url": _public_file_url(path_value),
-        "exists": exists,
-        "size_bytes": size_bytes,
-    }
+    return artifact_store.entry(key, path_value)
 
 
 def _project_manifest(project: Project) -> dict:
@@ -1159,6 +1137,7 @@ def providers() -> dict:
             "brave_configured": bool(settings.brave_search_api_key),
             "result_count": settings.search_result_count,
         },
+        "artifacts": artifact_store.metadata(),
         "jobs": {
             "available": [item.value for item in JobType],
             "run_inline": settings.run_jobs_inline,
@@ -1174,6 +1153,7 @@ def stats() -> dict:
         "version": "0.4.0",
         "env": settings.app_env,
         "storage": store.stats(),
+        "artifacts": artifact_store.metadata(),
         "jobs": job_store.stats(),
     }
 
@@ -1693,7 +1673,7 @@ def regenerate_scene_slide(project_id: str, scene_id: str, request: Request) -> 
 @app.get("/files/{file_path:path}")
 def get_file(file_path: str, request: Request) -> FileResponse:
     try:
-        path = ensure_within_directory(settings.data_dir, settings.data_dir / file_path)
+        path = artifact_store.resolve_file_request(file_path)
     except (OSError, ValueError):
         raise HTTPException(status_code=404, detail="File not found") from None
     if not path.is_file():

@@ -24,7 +24,7 @@ from app.services.source_service import SourceService
 from app.services.visual_service import VisualService
 from app.services.voice_service import VoiceService
 from app.storage import ProjectStore
-from app.utils.security import InvalidIdentifierError
+from app.utils.security import InvalidIdentifierError, UnsafePathError
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -60,6 +60,8 @@ def make_settings(tmp_path: Path) -> Settings:
         brave_search_api_key=None,
         brave_search_endpoint="https://api.search.brave.com/res/v1/web/search",
         search_result_count=3,
+        artifact_storage_backend="local",
+        artifact_url_ttl_seconds=3600,
         cleanup_retention_days=14,
         render_timeout_seconds=1800,
         max_request_body_bytes=2_000_000,
@@ -389,6 +391,28 @@ def test_render_export_package_skips_paths_outside_project_dir(tmp_path):
     assert "outside.txt" not in names
     assert "sources.json" in names
     assert any("path escapes project directory" in warning for warning in project.result.warnings)
+
+
+def test_artifact_store_public_url_entry_and_escape_guard(tmp_path):
+    from app.services.artifact_store import ArtifactStore
+
+    settings = make_settings(tmp_path / "data")
+    artifact_store = ArtifactStore(settings)
+    artifact_path = settings.data_dir / "project_aaaaaaaaaaaa" / "exports" / "result.txt"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("ok", encoding="utf-8")
+    outside_path = tmp_path / "outside.txt"
+    outside_path.write_text("secret", encoding="utf-8")
+
+    entry = artifact_store.entry("result_path", str(artifact_path))
+
+    assert artifact_store.public_url(str(artifact_path)) == "http://test/files/project_aaaaaaaaaaaa/exports/result.txt"
+    assert entry["exists"] is True
+    assert entry["size_bytes"] == 2
+    assert entry["storage_backend"] == "local"
+    assert artifact_store.public_url(str(outside_path)) is None
+    with pytest.raises(UnsafePathError):
+        artifact_store.resolve_artifact_path(str(outside_path))
 
 
 def test_get_settings_parses_openai_temperature(tmp_path, monkeypatch):
