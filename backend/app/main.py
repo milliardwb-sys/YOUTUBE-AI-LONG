@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.config import get_settings
 from app.models import (
+    ConsentCreate,
+    ConsentType,
     JobStatus,
     JobType,
     Organization,
@@ -44,6 +46,7 @@ from app.services.auth_service import (
 from app.services.audit_log_service import AuditLogService
 from app.services.backup_service import BackupNotFoundError, BackupService, InvalidBackupError
 from app.services.compliance_service import ComplianceService
+from app.services.consent_service import ConsentService
 from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
 from app.services.idempotency_service import (
     IdempotencyConflictError,
@@ -88,6 +91,7 @@ audit_log = AuditLogService(settings)
 usage_service = UsageService(settings)
 backup_service = BackupService(settings)
 organization_service = OrganizationService(settings)
+consent_service = ConsentService(settings)
 app_started_at = time.time()
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
@@ -480,6 +484,73 @@ def _default_project_organization_id(user: PlatformUser | None, payload: Project
     return organization_id
 
 
+def _consent_payload(record) -> dict:
+    return record.model_dump(mode="json")
+
+
+def _consent_scope_for_payload(payload: ConsentCreate, request: Request, user: PlatformUser | None) -> tuple[str | None, str | None]:
+    organization_id = payload.organization_id
+    project_id = payload.project_id
+    if project_id:
+        project = _get_project_or_404(project_id, request, permission="write")
+        if organization_id and project.organization_id and organization_id != project.organization_id:
+            raise HTTPException(status_code=400, detail="Consent organization_id does not match project organization")
+        organization_id = organization_id or project.organization_id
+    elif organization_id and _auth_enabled():
+        _require_organization_permission(organization_id, user, "write")
+    return organization_id, project_id
+
+
+def _required_consents_for_job(project: Project, job_type: JobType) -> list[ConsentType]:
+    required: list[ConsentType] = []
+    if project.voice_provider.value != "placeholder" and job_type in {
+        JobType.generate_voice,
+        JobType.render,
+        JobType.generate_all,
+    }:
+        required.append(ConsentType.voice)
+    if project.avatar_enabled and job_type in {
+        JobType.generate_slides,
+        JobType.prepare_avatar,
+        JobType.render,
+        JobType.generate_all,
+    }:
+        required.append(ConsentType.avatar)
+    return required
+
+
+def _enforce_project_consents(project: Project, user: PlatformUser | None, job_type: JobType) -> None:
+    missing: list[dict] = []
+    for consent_type in _required_consents_for_job(project, job_type):
+        voice_id = project.voice_id if consent_type == ConsentType.voice else None
+        if consent_service.has_grant(
+            consent_type=consent_type,
+            actor_id=_actor_id(user),
+            organization_id=project.organization_id,
+            project_id=project.id,
+            voice_id=voice_id,
+        ):
+            continue
+        missing.append(
+            {
+                "consent_type": consent_type.value,
+                "project_id": project.id,
+                "organization_id": project.organization_id,
+                "voice_id": voice_id,
+                "policy_version": "voice-avatar-consent-v1",
+            }
+        )
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "consent_required",
+                "message": "Legal consent is required before using voice/avatar features",
+                "missing": missing,
+            },
+        )
+
+
 def _request_id(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
@@ -778,6 +849,7 @@ def _start_project_job(project_id: str, job_type: JobType, request: Request, res
 
     if job_store.active_for_project(project_id) is None:
         _enforce_active_job_quota(user)
+    _enforce_project_consents(project, user, job_type)
     job = job_runner.start(project_id, job_type, owner_id=user.id if user else None)
     if key:
         idempotency_store.save(
@@ -1202,6 +1274,64 @@ def usage_me(request: Request) -> dict:
     }
 
 
+@app.get("/consents")
+def list_consents(
+    request: Request,
+    response: Response,
+    project_id: str | None = None,
+    organization_id: str | None = None,
+    consent_type: ConsentType | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    user = _current_user(request)
+    actor_id = _actor_id(user) if _auth_enabled() else None
+    if project_id:
+        project = _get_project_or_404(project_id, request)
+        organization_id = organization_id or project.organization_id
+        actor_id = None
+    if organization_id and _auth_enabled():
+        _require_organization_permission(organization_id, user, "read")
+        actor_id = None
+    records = consent_service.list_records(
+        actor_id=actor_id,
+        organization_id=organization_id,
+        project_id=project_id,
+        consent_type=consent_type,
+    )
+    _set_pagination_headers(response, total=len(records), limit=limit, offset=offset)
+    return [_consent_payload(record) for record in records[offset : offset + limit]]
+
+
+@app.post("/consents")
+def record_consent(payload: ConsentCreate, request: Request) -> dict:
+    user = _current_user(request)
+    organization_id, project_id = _consent_scope_for_payload(payload, request, user)
+    record = consent_service.record(
+        payload,
+        actor_id=_actor_id(user),
+        organization_id=organization_id,
+        project_id=project_id,
+        request_id=_request_id(request),
+    )
+    _audit(
+        request,
+        "consent.record",
+        actor_id=_actor_id(user),
+        resource_type="consent",
+        resource_id=record.id,
+        metadata={
+            "consent_type": record.consent_type.value,
+            "granted": record.granted,
+            "project_id": record.project_id,
+            "organization_id": record.organization_id,
+            "voice_id": record.voice_id,
+            "policy_version": record.policy_version,
+        },
+    )
+    return _consent_payload(record)
+
+
 @app.post("/projects")
 def create_project(payload: ProjectCreate, request: Request, response: Response) -> dict:
     user = _current_user(request)
@@ -1346,31 +1476,36 @@ def collect_sources(project_id: str, request: Request) -> dict:
 
 @app.post("/projects/{project_id}/generate-slides")
 def generate_slides(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request, permission="write")
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.generate_slides)
     return _sync_pipeline_response(pipeline.generate_slides(project_id))
 
 
 @app.post("/projects/{project_id}/generate-voice")
 def generate_voice(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request, permission="write")
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.generate_voice)
     return _sync_pipeline_response(pipeline.generate_voice(project_id))
 
 
 @app.post("/projects/{project_id}/prepare-avatar")
 def prepare_avatar(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request, permission="write")
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.prepare_avatar)
     return _sync_pipeline_response(pipeline.prepare_avatar(project_id))
 
 
 @app.post("/projects/{project_id}/render")
 def render(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request, permission="write")
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.render)
     return _sync_pipeline_response(pipeline.render(project_id))
 
 
 @app.post("/projects/{project_id}/generate-all")
 def generate_all(project_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request, permission="write")
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.generate_all)
     return _sync_pipeline_response(pipeline.generate_all(project_id))
 
 
@@ -1542,7 +1677,8 @@ def reorder_scenes(project_id: str, payload: SceneReorder, request: Request) -> 
 
 @app.post("/projects/{project_id}/scenes/{scene_id}/regenerate-slide")
 def regenerate_scene_slide(project_id: str, scene_id: str, request: Request) -> dict:
-    _get_project_or_404(project_id, request, permission="write")
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.generate_slides)
     try:
         return _sync_pipeline_response(pipeline.regenerate_scene_slide(project_id, scene_id))
     except SceneNotFoundError:

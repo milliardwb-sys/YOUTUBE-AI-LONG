@@ -13,6 +13,7 @@ export type ProjectStatus =
 
 export type JobStatus = 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
 export type OrganizationRole = 'owner' | 'admin' | 'editor' | 'viewer';
+export type ConsentType = 'voice' | 'avatar';
 export type JobType =
   | 'generate_script'
   | 'collect_sources'
@@ -191,6 +192,20 @@ export type OrganizationMember = {
   role: OrganizationRole;
   created_at: string;
   updated_at: string;
+};
+
+export type ConsentRecord = {
+  id: string;
+  consent_type: ConsentType;
+  actor_id?: string | null;
+  organization_id?: string | null;
+  project_id?: string | null;
+  voice_id?: string | null;
+  granted: boolean;
+  policy_version: string;
+  statement: string;
+  request_id?: string | null;
+  created_at: string;
 };
 
 export type AuditEvent = {

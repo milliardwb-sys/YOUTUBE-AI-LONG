@@ -714,6 +714,87 @@ def test_organization_rbac_controls_project_access(tmp_path, monkeypatch):
     assert alice_delete.status_code == 204
 
 
+def test_avatar_job_requires_legal_consent(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("RUN_JOBS_INLINE", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "avatar-consent@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/projects",
+        json={"topic": "Avatar consent project", "avatar_enabled": True},
+        headers=headers,
+    )
+    project_id = created.json()["id"]
+
+    blocked = client.post(f"/projects/{project_id}/jobs/prepare_avatar", headers=headers)
+    consent = client.post(
+        "/consents",
+        json={"consent_type": "avatar", "project_id": project_id, "granted": True},
+        headers=headers,
+    )
+    allowed = client.post(f"/projects/{project_id}/jobs/prepare_avatar", headers=headers)
+    records = client.get(f"/consents?project_id={project_id}", headers=headers)
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "consent_required"
+    assert blocked.json()["detail"]["missing"][0]["consent_type"] == "avatar"
+    assert consent.status_code == 200
+    assert consent.json()["consent_type"] == "avatar"
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "completed"
+    assert records.status_code == 200
+    assert records.json()[0]["granted"] is True
+
+
+def test_ai_voice_generation_requires_legal_consent(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "voice-consent@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/projects",
+        json={"topic": "Voice consent project", "voice_provider": "openai", "voice_id": "alloy"},
+        headers=headers,
+    )
+    project_id = created.json()["id"]
+    scripted = client.post(f"/projects/{project_id}/generate-script", headers=headers)
+
+    blocked = client.post(f"/projects/{project_id}/generate-voice", headers=headers)
+    consent = client.post(
+        "/consents",
+        json={"consent_type": "voice", "project_id": project_id, "voice_id": "alloy", "granted": True},
+        headers=headers,
+    )
+    allowed = client.post(f"/projects/{project_id}/generate-voice", headers=headers)
+
+    assert scripted.status_code == 200
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["missing"][0]["consent_type"] == "voice"
+    assert consent.status_code == 200
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "voice_ready"
+    assert allowed.json()["result"]["voice_manifest_url"]
+
+
 def test_audit_log_records_user_project_and_job_actions(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")

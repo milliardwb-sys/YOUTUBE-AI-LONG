@@ -1,6 +1,8 @@
 import type {
   AuditEvent,
   AuthToken,
+  ConsentRecord,
+  ConsentType,
   JobEvent,
   JobType,
   Organization,
@@ -262,6 +264,33 @@ export async function getAuditEvents(): Promise<AuditEvent[]> {
 export async function getUsageMe(): Promise<UsageOverview> {
   const response = await fetch(`${API_BASE_URL}/usage/me`, { headers: headers() });
   await assertOk(response, 'Get usage');
+  return response.json();
+}
+
+export async function listConsents(projectId?: string): Promise<ConsentRecord[]> {
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  const response = await fetch(`${API_BASE_URL}/consents${query}`, { headers: headers() });
+  await assertOk(response, 'List consents');
+  return response.json();
+}
+
+export async function recordConsent(options: {
+  consent_type: ConsentType;
+  project_id?: string;
+  organization_id?: string;
+  voice_id?: string | null;
+  granted?: boolean;
+}): Promise<ConsentRecord> {
+  const response = await fetch(`${API_BASE_URL}/consents`, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      granted: true,
+      policy_version: 'voice-avatar-consent-v1',
+      ...options,
+    }),
+  });
+  await assertOk(response, 'Record consent');
   return response.json();
 }
 

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.utils.security import UnsafeUrlError, validate_organization_id, validate_source_url, validate_user_id
+from app.utils.security import UnsafeUrlError, validate_organization_id, validate_project_id, validate_source_url, validate_user_id
 
 
 class ProjectStatus(str, Enum):
@@ -84,6 +84,11 @@ class OrganizationRole(str, Enum):
     admin = "admin"
     editor = "editor"
     viewer = "viewer"
+
+
+class ConsentType(str, Enum):
+    voice = "voice"
+    avatar = "avatar"
 
 
 class UserCreate(BaseModel):
@@ -224,6 +229,77 @@ class OrganizationMember(BaseModel):
 
     def touch(self) -> None:
         self.updated_at = datetime.now(timezone.utc)
+
+
+class ConsentCreate(BaseModel):
+    consent_type: ConsentType
+    project_id: str | None = None
+    organization_id: str | None = None
+    voice_id: str | None = Field(default=None, max_length=120)
+    granted: bool = True
+    policy_version: str = Field(default="voice-avatar-consent-v1", min_length=3, max_length=120)
+    statement: str = Field(
+        default=(
+            "I confirm that I have the required rights and permissions to use the selected "
+            "voice/avatar likeness for this project."
+        ),
+        min_length=10,
+        max_length=2000,
+    )
+
+    @field_validator("project_id")
+    @classmethod
+    def normalize_project_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_project_id(value.strip())
+
+    @field_validator("organization_id")
+    @classmethod
+    def normalize_consent_organization_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_organization_id(value.strip())
+
+    @field_validator("voice_id", "policy_version", "statement")
+    @classmethod
+    def strip_consent_text(cls, value: str | None) -> str | None:
+        return value.strip() if value else value
+
+
+class ConsentRecord(BaseModel):
+    id: str = Field(default_factory=lambda: f"consent_{uuid4().hex[:12]}")
+    consent_type: ConsentType
+    actor_id: str | None = None
+    organization_id: str | None = None
+    project_id: str | None = None
+    voice_id: str | None = None
+    granted: bool = True
+    policy_version: str
+    statement: str
+    request_id: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("actor_id")
+    @classmethod
+    def normalize_actor_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_user_id(value.strip())
+
+    @field_validator("organization_id")
+    @classmethod
+    def normalize_record_organization_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_organization_id(value.strip())
+
+    @field_validator("project_id")
+    @classmethod
+    def normalize_record_project_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_project_id(value.strip())
 
 
 class SourceCandidate(BaseModel):
