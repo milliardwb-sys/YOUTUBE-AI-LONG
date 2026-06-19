@@ -15,6 +15,7 @@ SOURCE_ID_RE = re.compile(r"^source_[a-f0-9]{8}$")
 USER_ID_RE = re.compile(r"^user_[a-f0-9]{12}$")
 ORGANIZATION_ID_RE = re.compile(r"^org_[a-f0-9]{12}$")
 CONSENT_ID_RE = re.compile(r"^consent_[a-f0-9]{12}$")
+SUPPORT_TICKET_ID_RE = re.compile(r"^ticket_[a-f0-9]{12}$")
 
 
 class InvalidIdentifierError(ValueError):
@@ -68,6 +69,12 @@ def validate_organization_id(value: str) -> str:
 def validate_consent_id(value: str) -> str:
     if not CONSENT_ID_RE.fullmatch(value):
         raise InvalidIdentifierError("Invalid consent id")
+    return value
+
+
+def validate_support_ticket_id(value: str) -> str:
+    if not SUPPORT_TICKET_ID_RE.fullmatch(value):
+        raise InvalidIdentifierError("Invalid support ticket id")
     return value
 
 

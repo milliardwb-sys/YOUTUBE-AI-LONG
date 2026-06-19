@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.utils.security import UnsafeUrlError, validate_organization_id, validate_project_id, validate_source_url, validate_user_id
+from app.utils.security import UnsafeUrlError, validate_job_id, validate_organization_id, validate_project_id, validate_source_url, validate_support_ticket_id, validate_user_id
 
 
 class ProjectStatus(str, Enum):
@@ -90,6 +90,20 @@ class OrganizationRole(str, Enum):
 class ConsentType(str, Enum):
     voice = "voice"
     avatar = "avatar"
+
+
+class SupportTicketStatus(str, Enum):
+    open = "open"
+    pending = "pending"
+    resolved = "resolved"
+    closed = "closed"
+
+
+class SupportTicketPriority(str, Enum):
+    low = "low"
+    normal = "normal"
+    high = "high"
+    urgent = "urgent"
 
 
 class UserCreate(BaseModel):
@@ -227,6 +241,125 @@ class OrganizationMember(BaseModel):
     @classmethod
     def validate_member_user_id(cls, value: str) -> str:
         return validate_user_id(value.strip())
+
+    def touch(self) -> None:
+        self.updated_at = datetime.now(timezone.utc)
+
+
+class SupportTicketCreate(BaseModel):
+    subject: str = Field(min_length=3, max_length=180)
+    message: str = Field(min_length=3, max_length=4000)
+    user_id: str | None = None
+    organization_id: str | None = None
+    project_id: str | None = None
+    job_id: str | None = None
+    priority: SupportTicketPriority = SupportTicketPriority.normal
+    tags: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("subject", "message")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("user_id")
+    @classmethod
+    def normalize_ticket_user_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_user_id(value.strip())
+
+    @field_validator("organization_id")
+    @classmethod
+    def normalize_ticket_organization_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_organization_id(value.strip())
+
+    @field_validator("project_id")
+    @classmethod
+    def normalize_ticket_project_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_project_id(value.strip())
+
+    @field_validator("job_id")
+    @classmethod
+    def normalize_ticket_job_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_job_id(value.strip())
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_ticket_tags(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for tag in value:
+            clean = tag.strip().lower().replace(" ", "_")[:40]
+            if clean and clean not in seen:
+                seen.add(clean)
+                normalized.append(clean)
+        return normalized
+
+
+class SupportTicketUpdate(BaseModel):
+    status: SupportTicketStatus | None = None
+    priority: SupportTicketPriority | None = None
+    assignee: str | None = Field(default=None, max_length=120)
+    tags: list[str] | None = Field(default=None, max_length=12)
+
+    @field_validator("assignee")
+    @classmethod
+    def strip_assignee(cls, value: str | None) -> str | None:
+        return value.strip() if value else None
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_update_tags(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return SupportTicketCreate.normalize_ticket_tags(value)
+
+
+class SupportTicketNoteCreate(BaseModel):
+    body: str = Field(min_length=2, max_length=4000)
+    internal: bool = True
+
+    @field_validator("body")
+    @classmethod
+    def strip_body(cls, value: str) -> str:
+        return value.strip()
+
+
+class SupportTicketNote(BaseModel):
+    id: str = Field(default_factory=lambda: f"note_{uuid4().hex[:12]}")
+    author: str | None = Field(default=None, max_length=120)
+    body: str
+    internal: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class SupportTicket(BaseModel):
+    id: str = Field(default_factory=lambda: f"ticket_{uuid4().hex[:12]}")
+    subject: str
+    message: str
+    status: SupportTicketStatus = SupportTicketStatus.open
+    priority: SupportTicketPriority = SupportTicketPriority.normal
+    user_id: str | None = None
+    organization_id: str | None = None
+    project_id: str | None = None
+    job_id: str | None = None
+    assignee: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    notes: list[SupportTicketNote] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resolved_at: datetime | None = None
+
+    @field_validator("id")
+    @classmethod
+    def normalize_ticket_id(cls, value: str) -> str:
+        return validate_support_ticket_id(value.strip())
 
     def touch(self) -> None:
         self.updated_at = datetime.now(timezone.utc)

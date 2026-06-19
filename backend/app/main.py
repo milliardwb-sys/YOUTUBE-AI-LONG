@@ -32,6 +32,10 @@ from app.models import (
     SceneCreate,
     ScenePatch,
     SceneReorder,
+    SupportTicketCreate,
+    SupportTicketNoteCreate,
+    SupportTicketStatus,
+    SupportTicketUpdate,
     UserCreate,
     UserLogin,
 )
@@ -65,6 +69,7 @@ from app.services.organization_service import (
 from app.services.oidc_service import OIDCService, OIDCValidationError
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
+from app.services.support_service import SupportService, SupportTicketNotFoundError
 from app.services.usage_service import UsageService
 from app.services.source_service import SourceService
 from app.services.visual_service import VisualService
@@ -98,6 +103,7 @@ backup_service = BackupService(settings)
 organization_service = OrganizationService(settings)
 consent_service = ConsentService(settings)
 artifact_store = ArtifactStore(settings)
+support_service = SupportService(settings)
 app_started_at = time.time()
 rate_limit_lock = Lock()
 rate_limit_windows: dict[str, tuple[int, int]] = {}
@@ -1331,6 +1337,10 @@ def _admin_user_payload(user: PlatformUser) -> dict:
     }
 
 
+def _support_ticket_payload(ticket) -> dict:
+    return ticket.model_dump(mode="json")
+
+
 @app.get("/admin/overview")
 def admin_overview(request: Request) -> dict:
     _require_admin(request)
@@ -1355,6 +1365,7 @@ def admin_overview(request: Request) -> dict:
             "metadata": billing_service.metadata(),
             "account_count": len(billing_service.list_accounts()),
         },
+        "support": support_service.metadata(),
         "audit": {
             "metadata": audit_log.metadata(),
             "event_count": len(audit_log.list_events()),
@@ -1440,6 +1451,90 @@ def admin_audit_events(
 def admin_usage(request: Request) -> dict:
     _require_admin(request)
     return usage_service.summary()
+
+
+@app.get("/admin/support/tickets")
+def admin_support_tickets(
+    request: Request,
+    response: Response,
+    status: SupportTicketStatus | None = None,
+    user_id: str | None = None,
+    project_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    _require_admin(request)
+    tickets = support_service.list_tickets(status=status, user_id=user_id, project_id=project_id)
+    _set_pagination_headers(response, total=len(tickets), limit=limit, offset=offset)
+    return [_support_ticket_payload(ticket) for ticket in tickets[offset : offset + limit]]
+
+
+@app.post("/admin/support/tickets")
+def admin_create_support_ticket(payload: SupportTicketCreate, request: Request) -> dict:
+    _require_admin(request)
+    ticket = support_service.create_ticket(payload, created_by="admin")
+    _audit(
+        request,
+        "support.ticket.create",
+        resource_type="support_ticket",
+        resource_id=ticket.id,
+        metadata={
+            "status": ticket.status.value,
+            "priority": ticket.priority.value,
+            "user_id": ticket.user_id,
+            "project_id": ticket.project_id,
+            "job_id": ticket.job_id,
+        },
+    )
+    return _support_ticket_payload(ticket)
+
+
+@app.get("/admin/support/tickets/{ticket_id}")
+def admin_support_ticket(ticket_id: str, request: Request) -> dict:
+    _require_admin(request)
+    try:
+        ticket = support_service.get_ticket(ticket_id)
+    except SupportTicketNotFoundError:
+        raise HTTPException(status_code=404, detail="Support ticket not found") from None
+    return _support_ticket_payload(ticket)
+
+
+@app.patch("/admin/support/tickets/{ticket_id}")
+def admin_update_support_ticket(ticket_id: str, payload: SupportTicketUpdate, request: Request) -> dict:
+    _require_admin(request)
+    try:
+        ticket = support_service.update_ticket(ticket_id, payload)
+    except SupportTicketNotFoundError:
+        raise HTTPException(status_code=404, detail="Support ticket not found") from None
+    _audit(
+        request,
+        "support.ticket.update",
+        resource_type="support_ticket",
+        resource_id=ticket.id,
+        metadata={
+            "status": ticket.status.value,
+            "priority": ticket.priority.value,
+            "assignee": ticket.assignee,
+        },
+    )
+    return _support_ticket_payload(ticket)
+
+
+@app.post("/admin/support/tickets/{ticket_id}/notes")
+def admin_add_support_ticket_note(ticket_id: str, payload: SupportTicketNoteCreate, request: Request) -> dict:
+    _require_admin(request)
+    try:
+        ticket = support_service.add_note(ticket_id, payload, author="admin")
+    except SupportTicketNotFoundError:
+        raise HTTPException(status_code=404, detail="Support ticket not found") from None
+    _audit(
+        request,
+        "support.ticket.note",
+        resource_type="support_ticket",
+        resource_id=ticket.id,
+        metadata={"internal": payload.internal, "note_count": len(ticket.notes)},
+    )
+    return _support_ticket_payload(ticket)
 
 
 @app.post("/maintenance/cleanup")

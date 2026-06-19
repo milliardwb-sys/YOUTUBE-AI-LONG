@@ -1501,6 +1501,72 @@ def test_admin_projects_and_users_cross_user_boundaries(tmp_path, monkeypatch):
     assert users.headers["x-total-count"] == "2"
 
 
+def test_admin_support_ticket_workflow_records_audit(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("ADMIN_API_KEY", "local-admin-secret")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "support-user@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    created = client.post(
+        "/projects",
+        json={"topic": "Support ticket project"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    admin_headers = {"X-Admin-Key": "local-admin-secret"}
+    ticket = client.post(
+        "/admin/support/tickets",
+        headers=admin_headers,
+        json={
+            "subject": "Render job failed",
+            "message": "Customer reports a failed render",
+            "user_id": created.json()["owner_id"],
+            "project_id": created.json()["id"],
+            "priority": "high",
+            "tags": [" Render ", "failure"],
+        },
+    )
+    ticket_id = ticket.json()["id"]
+    updated = client.patch(
+        f"/admin/support/tickets/{ticket_id}",
+        headers=admin_headers,
+        json={"status": "pending", "assignee": "support-lead", "tags": ["render", "triage"]},
+    )
+    noted = client.post(
+        f"/admin/support/tickets/{ticket_id}/notes",
+        headers=admin_headers,
+        json={"body": "Asked user for render logs.", "internal": True},
+    )
+    listed = client.get("/admin/support/tickets?status=pending", headers=admin_headers)
+    audit = client.get(f"/admin/audit/events?resource_type=support_ticket&resource_id={ticket_id}", headers=admin_headers)
+    overview = client.get("/admin/overview", headers=admin_headers)
+
+    assert ticket.status_code == 200
+    assert ticket.json()["priority"] == "high"
+    assert ticket.json()["tags"] == ["render", "failure"]
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "pending"
+    assert updated.json()["assignee"] == "support-lead"
+    assert noted.status_code == 200
+    assert len(noted.json()["notes"]) == 2
+    assert listed.status_code == 200
+    assert listed.headers["x-total-count"] == "1"
+    assert listed.json()[0]["id"] == ticket_id
+    assert {event["action"] for event in audit.json()} >= {
+        "support.ticket.create",
+        "support.ticket.update",
+        "support.ticket.note",
+    }
+    assert overview.json()["support"]["ticket_count"] == 1
+
+
 def test_observability_metrics_collects_requests(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "local")
