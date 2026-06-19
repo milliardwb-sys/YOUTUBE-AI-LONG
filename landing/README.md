@@ -1,15 +1,16 @@
-# YOUTUBE AI LONG landing
+# Лендинг YOUTUBE AI LONG
 
-This folder contains the static product landing page for the repository.
+В этой папке находится статический продуктовый лендинг репозитория.
 
-Open `landing/index.html` directly in a browser, or publish the whole `landing/`
-folder to any static hosting service. The page links to the local FastAPI docs at
-`http://localhost:8000/docs`, so that link works after the backend is running.
+Файл `landing/index.html` можно открыть напрямую в браузере или опубликовать всю
+папку `landing/` на любом статическом хостинге. Ссылки на API ведут в локальную
+документацию FastAPI по адресу `http://localhost:8000/docs`, поэтому они работают
+после запуска бэкенда.
 
-GitHub Pages deployment is configured through
-`.github/workflows/deploy-landing.yml`. After the workflow runs successfully on
-`main`, the expected public URL is:
+Деплой на GitHub Pages настроен через
+`.github/workflows/deploy-landing.yml`. После успешного выполнения процесса деплоя на
+ветке `main` публичный URL:
 `https://milliardwb-sys.github.io/YOUTUBE-AI-LONG/`.
 
-The hero visual is generated from a product dashboard concept and stored as
+Hero-визуал собран как концепт панели управления продуктом и хранится в
 `landing/assets/hero-dashboard.png`.

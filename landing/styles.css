@@ -492,12 +492,15 @@ code {
   }
 
   .brand {
-    font-size: 19px;
+    font-size: 16px;
+    white-space: nowrap;
   }
 
   .header-action {
     min-width: 0;
-    padding: 0 14px;
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
   }
 
   .hero {
@@ -508,28 +511,51 @@ code {
     width: calc(100% - 36px);
     max-width: 330px;
     margin-left: 18px;
-    padding-top: 56px;
+    padding-top: 42px;
+    padding-bottom: 42px;
   }
 
   .hero h1 {
-    font-size: 46px;
+    font-size: 42px;
   }
 
   .hero-copy {
-    font-size: 19px;
+    margin-top: 22px;
+    font-size: 18px;
+    line-height: 1.48;
+  }
+
+  .hero-actions {
+    gap: 10px;
+    margin-top: 22px;
+  }
+
+  .button {
+    min-height: 48px;
   }
 
   .hero-stats {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 28px;
+    gap: 10px;
+    margin-top: 18px;
     padding-bottom: 0;
     overflow: visible;
   }
 
   .hero-stats div {
     min-width: 0;
+    padding-top: 9px;
+  }
+
+  .hero-stats dt {
+    font-size: 11px;
+  }
+
+  .hero-stats dd {
+    margin-top: 4px;
+    font-size: 16px;
+    line-height: 1.18;
   }
 
   .section {
@@ -560,7 +586,7 @@ code {
   }
 
   .header-action {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .button {
@@ -568,7 +594,7 @@ code {
   }
 
   .hero h1 {
-    font-size: 40px;
+    font-size: 39px;
   }
 
 }

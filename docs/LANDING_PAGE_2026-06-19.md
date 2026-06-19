@@ -1,29 +1,28 @@
-# Landing Page Audit Note - 2026-06-19
+# Заметка по лендингу - 2026-06-19
 
-## What was added
+## Что добавлено
 
-- Static landing page in `landing/index.html`.
-- Responsive CSS in `landing/styles.css`.
-- Generated dashboard hero asset in `landing/assets/hero-dashboard.png`.
-- Local publishing instructions in `landing/README.md`.
-- GitHub Pages workflow in `.github/workflows/deploy-landing.yml`.
+- Статический лендинг в `landing/index.html`.
+- Адаптивные стили в `landing/styles.css`.
+- Hero-ассет панели управления в `landing/assets/hero-dashboard.png`.
+- Локальная инструкция по публикации в `landing/README.md`.
+- Файл деплоя GitHub Pages в `.github/workflows/deploy-landing.yml`.
 
-## Product message
+## Продуктовое сообщение
 
-The landing positions the project as `YOUTUBE AI LONG`: an operator-facing AI
-video studio for long-form YouTube production. It explains the main workflow:
-research, script, voice and avatar preparation, slides, render and publish
-handoff.
+Лендинг позиционирует проект как `YOUTUBE AI LONG`: операторскую ИИ-студию для
+производства длинных YouTube-видео. Он объясняет основной процесс: исследование,
+сценарий, подготовка голоса и аватара, слайды, рендер и передача на публикацию.
 
-## Integration message
+## Сообщение об интеграциях
 
-The page documents the production-facing surfaces already represented in the
-codebase: OpenAI, voice/avatar providers, media search, YouTube, PostgreSQL,
-S3-compatible object storage, worker queues, OIDC/RBAC and Stripe billing.
+Страница описывает продакшен-направления, уже представленные в кодовой базе:
+OpenAI, провайдеры голоса и аватаров, поиск медиа, YouTube, PostgreSQL,
+S3-совместимое объектное хранилище, очереди воркеров, OIDC/RBAC и биллинг Stripe.
 
-## Remaining landing work
+## Что осталось для лендинга
 
-- Replace local API links with the deployed backend URL after hosting is chosen.
-- Add real screenshots after the backend and mobile client are connected to live
-  providers.
-- Add analytics only after privacy and consent requirements are finalized.
+- Заменить локальные API-ссылки на URL развернутого бэкенда после выбора хостинга.
+- Добавить реальные скриншоты после подключения бэкенда и мобильного клиента к
+  рабочим провайдерам.
+- Добавлять аналитику только после финализации требований приватности и согласий.
