@@ -7,3 +7,4 @@ imageio-ffmpeg==0.6.0
 psycopg[binary]==3.3.4
 boto3==1.43.33
 stripe==15.2.1
+PyJWT[crypto]==2.13.0

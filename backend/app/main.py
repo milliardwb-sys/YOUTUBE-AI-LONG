@@ -62,6 +62,7 @@ from app.services.organization_service import (
     OrganizationNotFoundError,
     OrganizationService,
 )
+from app.services.oidc_service import OIDCService, OIDCValidationError
 from app.services.render_service import RenderService
 from app.services.script_service import ScriptService
 from app.services.usage_service import UsageService
@@ -88,6 +89,7 @@ pipeline = VideoPipeline(
 job_store = JobStore(settings)
 job_runner = JobRunner(settings, pipeline, job_store)
 auth_service = AuthService(settings)
+oidc_service = OIDCService(settings)
 idempotency_store = IdempotencyStore(settings)
 audit_log = AuditLogService(settings)
 usage_service = UsageService(settings)
@@ -346,6 +348,19 @@ def _current_user(request: Request) -> PlatformUser | None:
     try:
         return auth_service.get_user_by_token(token)
     except (InvalidCredentialsError, SessionNotFoundError):
+        if not settings.oidc_enabled:
+            raise HTTPException(status_code=401, detail="Invalid or expired bearer token") from None
+    try:
+        identity = oidc_service.verify_token(token)
+        user = auth_service.upsert_external_user(
+            issuer=identity.issuer,
+            subject=identity.subject,
+            email=identity.email,
+            name=identity.name,
+        )
+        organization_service.ensure_personal_organization(user)
+        return user
+    except OIDCValidationError:
         raise HTTPException(status_code=401, detail="Invalid or expired bearer token") from None
 
 
@@ -953,6 +968,10 @@ def diagnostics() -> dict:
             "voice_default": settings.default_voice_provider,
         },
         "billing": billing_service.metadata(),
+        "auth": {
+            "user_auth_enabled": settings.enable_user_auth,
+            "oidc": oidc_service.metadata(),
+        },
         "jobs": {
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
@@ -1274,6 +1293,10 @@ def providers() -> dict:
         "project_storage": store.metadata(),
         "artifacts": artifact_store.metadata(),
         "billing": billing_service.metadata(),
+        "auth": {
+            "user_auth_enabled": settings.enable_user_auth,
+            "oidc": oidc_service.metadata(),
+        },
         "jobs": {
             "available": [item.value for item in JobType],
             "run_inline": settings.run_jobs_inline,

@@ -47,6 +47,13 @@ class Settings:
     admin_api_key: str | None
     enable_user_auth: bool
     access_token_ttl_minutes: int
+    oidc_enabled: bool
+    oidc_issuer_url: str | None
+    oidc_audience: str | None
+    oidc_jwks_url: str | None
+    oidc_algorithms: list[str]
+    oidc_email_claim: str
+    oidc_name_claim: str
     rate_limit_requests_per_minute: int
     cors_origins: list[str]
     allow_unsafe_http_sources: bool
@@ -164,6 +171,13 @@ def get_settings() -> Settings:
         admin_api_key=_env_optional("ADMIN_API_KEY"),
         enable_user_auth=_env_bool("ENABLE_USER_AUTH", False),
         access_token_ttl_minutes=max(5, _env_int("ACCESS_TOKEN_TTL_MINUTES", 1440)),
+        oidc_enabled=_env_bool("OIDC_ENABLED", False),
+        oidc_issuer_url=_env_optional("OIDC_ISSUER_URL"),
+        oidc_audience=_env_optional("OIDC_AUDIENCE"),
+        oidc_jwks_url=_env_optional("OIDC_JWKS_URL"),
+        oidc_algorithms=_env_list("OIDC_ALGORITHMS", ["RS256"]),
+        oidc_email_claim=os.getenv("OIDC_EMAIL_CLAIM", "email").strip() or "email",
+        oidc_name_claim=os.getenv("OIDC_NAME_CLAIM", "name").strip() or "name",
         rate_limit_requests_per_minute=_env_int("RATE_LIMIT_REQUESTS_PER_MINUTE", 0),
         cors_origins=_env_list("CORS_ORIGINS", ["http://localhost:19006", "http://localhost:8081"]),
         allow_unsafe_http_sources=_env_bool("ALLOW_UNSAFE_HTTP_SOURCES", False),
@@ -225,6 +239,17 @@ def validate_settings(settings: Settings) -> None:
         raise ConfigurationError("STRIPE_PRO_PRICE_ID is required when STRIPE_API_KEY is configured")
     if settings.app_env not in LOCAL_ENVS and settings.stripe_api_key and not settings.stripe_webhook_secret:
         raise ConfigurationError("STRIPE_WEBHOOK_SECRET is required when Stripe billing is enabled in non-local environments")
+    if settings.oidc_enabled:
+        if not settings.enable_user_auth:
+            raise ConfigurationError("ENABLE_USER_AUTH=true is required when OIDC_ENABLED=true")
+        if not settings.oidc_issuer_url:
+            raise ConfigurationError("OIDC_ISSUER_URL is required when OIDC_ENABLED=true")
+        if not settings.oidc_audience:
+            raise ConfigurationError("OIDC_AUDIENCE is required when OIDC_ENABLED=true")
+        if not settings.oidc_jwks_url:
+            raise ConfigurationError("OIDC_JWKS_URL is required when OIDC_ENABLED=true")
+        if not settings.oidc_algorithms:
+            raise ConfigurationError("OIDC_ALGORITHMS must contain at least one algorithm when OIDC_ENABLED=true")
     if settings.app_env in LOCAL_ENVS or not settings.api_key:
         return
     if settings.api_key in WEAK_PRODUCTION_API_KEYS:

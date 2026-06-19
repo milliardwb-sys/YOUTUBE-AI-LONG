@@ -65,6 +65,37 @@ class AuthService:
         self._save_session(session)
         return AuthToken(access_token=token, expires_at=expires_at, user=user.public())
 
+    def upsert_external_user(
+        self,
+        *,
+        issuer: str,
+        subject: str,
+        email: str | None = None,
+        name: str | None = None,
+    ) -> PlatformUser:
+        identity_hash = hashlib.sha256(f"{issuer}:{subject}".encode("utf-8")).hexdigest()
+        external_user_id = f"user_{identity_hash[:12]}"
+        clean_email = email.strip().lower() if email else f"oidc-{identity_hash[:16]}@external.local"
+        clean_name = name.strip() if name else None
+        with self._lock:
+            try:
+                user = self.get_user(external_user_id)
+            except InvalidCredentialsError:
+                user = self.find_user_by_email(clean_email)
+            if user is None:
+                user = PlatformUser(
+                    id=external_user_id,
+                    email=clean_email,
+                    name=clean_name,
+                    password_hash=f"external_oidc${identity_hash}",
+                )
+            else:
+                user.email = clean_email
+                if clean_name:
+                    user.name = clean_name
+            self._save_user(user)
+            return user
+
     def get_user_by_token(self, token: str) -> PlatformUser:
         token_hash = _hash_token(token)
         now = datetime.now(timezone.utc)

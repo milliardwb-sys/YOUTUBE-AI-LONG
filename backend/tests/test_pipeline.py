@@ -59,6 +59,13 @@ def make_settings(tmp_path: Path) -> Settings:
         admin_api_key=None,
         enable_user_auth=False,
         access_token_ttl_minutes=1440,
+        oidc_enabled=False,
+        oidc_issuer_url=None,
+        oidc_audience=None,
+        oidc_jwks_url=None,
+        oidc_algorithms=["RS256"],
+        oidc_email_claim="email",
+        oidc_name_claim="name",
         rate_limit_requests_per_minute=0,
         cors_origins=["http://localhost:19006"],
         allow_unsafe_http_sources=False,
@@ -610,6 +617,27 @@ def test_get_settings_requires_stripe_webhook_secret_in_production(tmp_path, mon
         get_settings()
 
 
+def test_get_settings_requires_user_auth_for_oidc(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OIDC_ENABLED", "true")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "false")
+
+    with pytest.raises(ConfigurationError, match="ENABLE_USER_AUTH"):
+        get_settings()
+
+
+def test_get_settings_requires_oidc_provider_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OIDC_ENABLED", "true")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://issuer.example")
+    monkeypatch.setenv("OIDC_AUDIENCE", "youtube-ai-long")
+    monkeypatch.delenv("OIDC_JWKS_URL", raising=False)
+
+    with pytest.raises(ConfigurationError, match="OIDC_JWKS_URL"):
+        get_settings()
+
+
 def test_get_settings_rejects_weak_production_api_key(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("APP_ENV", "production")
@@ -797,6 +825,46 @@ def test_user_auth_register_login_and_me(tmp_path, monkeypatch):
     assert logout.status_code == 200
     assert logout.json()["revoked"] is True
     assert client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
+def test_oidc_bearer_token_upserts_user_and_personal_org(tmp_path, monkeypatch):
+    from app.services.oidc_service import OIDCIdentity
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("OIDC_ENABLED", "true")
+    monkeypatch.setenv("OIDC_ISSUER_URL", "https://issuer.example")
+    monkeypatch.setenv("OIDC_AUDIENCE", "youtube-ai-long")
+    monkeypatch.setenv("OIDC_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+    monkeypatch.setattr(
+        main.oidc_service,
+        "verify_token",
+        lambda token: OIDCIdentity(
+            issuer="https://issuer.example",
+            subject="external-user-1",
+            email="oidc@example.com",
+            name="OIDC User",
+            claims={"sub": "external-user-1"},
+        ),
+    )
+    headers = {"Authorization": "Bearer external.jwt.token"}
+
+    me = client.get("/auth/me", headers=headers)
+    orgs = client.get("/organizations", headers=headers)
+    created = client.post("/projects", json={"topic": "OIDC authenticated project"}, headers=headers)
+
+    assert me.status_code == 200
+    assert me.json()["email"] == "oidc@example.com"
+    assert orgs.status_code == 200
+    assert orgs.json()[0]["role"] == "owner"
+    assert created.status_code == 200
+    assert created.json()["owner_id"] == me.json()["id"]
+    assert created.json()["organization_id"] == orgs.json()[0]["id"]
 
 
 def test_auth_service_revokes_and_cleans_expired_sessions(tmp_path):

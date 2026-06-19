@@ -111,6 +111,7 @@ Docker Compose now starts PostgreSQL for project metadata and durable job state 
 Generated files still use the `backend-projects` volume through `DATA_DIR`.
 Set `ARTIFACT_STORAGE_BACKEND=s3` plus `S3_*` settings to publish result artifacts through S3/R2-compatible object storage.
 Set `STRIPE_API_KEY`, `STRIPE_PRO_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` to enable subscription checkout, customer portal, and billing-based quotas.
+Set `ENABLE_USER_AUTH=true` and `OIDC_ENABLED=true` with `OIDC_*` settings to accept managed-auth JWTs from an external OIDC provider.
 Replace the example database password before any public deployment.
 
 После старта:
