@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import shutil
 import subprocess
 import sys
@@ -83,6 +84,15 @@ def make_settings(tmp_path: Path) -> Settings:
         usage_llm_job_cost_cents=1,
         usage_tts_cost_cents_per_minute=1,
         usage_render_cost_cents_per_minute=2,
+        stripe_api_key=None,
+        stripe_api_version="2026-02-25.clover",
+        stripe_webhook_secret=None,
+        stripe_pro_price_id=None,
+        stripe_success_url="http://localhost:19006/billing/success",
+        stripe_cancel_url="http://localhost:19006/billing/cancel",
+        stripe_portal_return_url="http://localhost:19006/billing",
+        billing_pro_max_projects=250,
+        billing_pro_max_active_jobs=10,
     )
 
 
@@ -576,6 +586,27 @@ def test_get_settings_requires_s3_access_key_pair(tmp_path, monkeypatch):
     monkeypatch.delenv("S3_SECRET_ACCESS_KEY", raising=False)
 
     with pytest.raises(ConfigurationError, match="S3_ACCESS_KEY_ID"):
+        get_settings()
+
+
+def test_get_settings_requires_stripe_price_when_api_key_is_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("STRIPE_API_KEY", "stripe-test-key-placeholder")
+    monkeypatch.delenv("STRIPE_PRO_PRICE_ID", raising=False)
+
+    with pytest.raises(ConfigurationError, match="STRIPE_PRO_PRICE_ID"):
+        get_settings()
+
+
+def test_get_settings_requires_stripe_webhook_secret_in_production(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("API_KEY", "prod-api-key-with-more-than-thirty-two-characters")
+    monkeypatch.setenv("STRIPE_API_KEY", "stripe-test-key-placeholder")
+    monkeypatch.setenv("STRIPE_PRO_PRICE_ID", "price_test")
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+
+    with pytest.raises(ConfigurationError, match="STRIPE_WEBHOOK_SECRET"):
         get_settings()
 
 
@@ -1151,6 +1182,104 @@ def test_project_quota_blocks_new_projects(tmp_path, monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 402
     assert second.json()["detail"]["code"] == "project_quota_exceeded"
+
+
+def test_billing_me_reports_free_entitlements(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    token = client.post(
+        "/auth/register",
+        json={"email": "billing-free@example.com", "password": "strong-password"},
+    ).json()["access_token"]
+    response = client.get("/billing/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["entitlements"]["plan"] == "free"
+    assert response.json()["usage_limits"]["max_projects"] == 25
+
+
+def test_billing_pro_subscription_lifts_project_quota(tmp_path, monkeypatch):
+    from app.services.billing_service import BillingAccount
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.setenv("USAGE_MAX_PROJECTS_PER_USER", "1")
+    monkeypatch.setenv("BILLING_PRO_MAX_PROJECTS", "2")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    auth = client.post(
+        "/auth/register",
+        json={"email": "billing-pro@example.com", "password": "strong-password"},
+    ).json()
+    token = auth["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    user_id = auth["user"]["id"]
+    first = client.post("/projects", json={"topic": "First billed project"}, headers=headers)
+    main.billing_service.save_account(
+        BillingAccount(
+            actor_id=user_id,
+            plan="pro",
+            status="active",
+            stripe_customer_id="cus_test",
+            stripe_subscription_id="sub_test",
+            stripe_price_id="price_pro",
+            current_period_end=None,
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    second = client.post("/projects", json={"topic": "Second billed project"}, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert client.get("/billing/me", headers=headers).json()["entitlements"]["plan"] == "pro"
+
+
+def test_stripe_webhook_updates_subscription_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("ENABLE_USER_AUTH", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    auth = client.post(
+        "/auth/register",
+        json={"email": "billing-webhook@example.com", "password": "strong-password"},
+    ).json()
+    user_id = auth["user"]["id"]
+    monkeypatch.setattr(main.billing_service, "construct_webhook_event", lambda payload, signature: json.loads(payload))
+    event = {
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_test",
+                "customer": "cus_test",
+                "status": "active",
+                "current_period_end": 1893456000,
+                "metadata": {"user_id": user_id, "plan": "pro"},
+                "items": {"data": [{"price": {"id": "price_pro"}}]},
+            }
+        },
+    }
+
+    webhook = client.post("/billing/stripe/webhook", json=event)
+    billing = client.get("/billing/me", headers={"Authorization": f"Bearer {auth['access_token']}"})
+
+    assert webhook.status_code == 200
+    assert webhook.json()["handled"] is True
+    assert billing.json()["account"]["stripe_subscription_id"] == "sub_test"
+    assert billing.json()["entitlements"]["plan"] == "pro"
 
 
 def test_api_key_and_user_auth_are_both_required_when_enabled(tmp_path, monkeypatch):

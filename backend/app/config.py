@@ -72,6 +72,15 @@ class Settings:
     usage_llm_job_cost_cents: int
     usage_tts_cost_cents_per_minute: int
     usage_render_cost_cents_per_minute: int
+    stripe_api_key: str | None
+    stripe_api_version: str
+    stripe_webhook_secret: str | None
+    stripe_pro_price_id: str | None
+    stripe_success_url: str
+    stripe_cancel_url: str
+    stripe_portal_return_url: str
+    billing_pro_max_projects: int
+    billing_pro_max_active_jobs: int
 
 
 class ConfigurationError(RuntimeError):
@@ -183,6 +192,15 @@ def get_settings() -> Settings:
         usage_llm_job_cost_cents=max(0, _env_int("USAGE_LLM_JOB_COST_CENTS", 1)),
         usage_tts_cost_cents_per_minute=max(0, _env_int("USAGE_TTS_COST_CENTS_PER_MINUTE", 1)),
         usage_render_cost_cents_per_minute=max(0, _env_int("USAGE_RENDER_COST_CENTS_PER_MINUTE", 2)),
+        stripe_api_key=_env_optional("STRIPE_API_KEY"),
+        stripe_api_version=os.getenv("STRIPE_API_VERSION", "2026-02-25.clover").strip(),
+        stripe_webhook_secret=_env_optional("STRIPE_WEBHOOK_SECRET"),
+        stripe_pro_price_id=_env_optional("STRIPE_PRO_PRICE_ID"),
+        stripe_success_url=os.getenv("STRIPE_SUCCESS_URL", "http://localhost:19006/billing/success").strip(),
+        stripe_cancel_url=os.getenv("STRIPE_CANCEL_URL", "http://localhost:19006/billing/cancel").strip(),
+        stripe_portal_return_url=os.getenv("STRIPE_PORTAL_RETURN_URL", "http://localhost:19006/billing").strip(),
+        billing_pro_max_projects=max(0, _env_int("BILLING_PRO_MAX_PROJECTS", 250)),
+        billing_pro_max_active_jobs=max(0, _env_int("BILLING_PRO_MAX_ACTIVE_JOBS", 10)),
     )
     validate_settings(settings)
     return settings
@@ -203,6 +221,10 @@ def validate_settings(settings: Settings) -> None:
         raise ConfigurationError("S3_BUCKET is required when ARTIFACT_STORAGE_BACKEND=s3")
     if bool(settings.s3_access_key_id) != bool(settings.s3_secret_access_key):
         raise ConfigurationError("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together")
+    if settings.stripe_api_key and not settings.stripe_pro_price_id:
+        raise ConfigurationError("STRIPE_PRO_PRICE_ID is required when STRIPE_API_KEY is configured")
+    if settings.app_env not in LOCAL_ENVS and settings.stripe_api_key and not settings.stripe_webhook_secret:
+        raise ConfigurationError("STRIPE_WEBHOOK_SECRET is required when Stripe billing is enabled in non-local environments")
     if settings.app_env in LOCAL_ENVS or not settings.api_key:
         return
     if settings.api_key in WEAK_PRODUCTION_API_KEYS:

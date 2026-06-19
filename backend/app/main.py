@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.config import LOCAL_ENVS, get_settings
 from app.models import (
+    BillingCheckoutCreate,
     ConsentCreate,
     ConsentType,
     JobStatus,
@@ -45,6 +46,7 @@ from app.services.auth_service import (
 from app.services.audit_log_service import AuditLogService
 from app.services.artifact_store import ArtifactStore
 from app.services.backup_service import BackupNotFoundError, BackupService, InvalidBackupError
+from app.services.billing_service import BillingAccountNotFoundError, BillingNotConfiguredError, BillingService
 from app.services.compliance_service import ComplianceService
 from app.services.consent_service import ConsentService
 from app.services.job_service import JobNotCancellableError, JobNotFoundError, JobNotRetryableError, JobRunner, JobStore
@@ -89,6 +91,7 @@ auth_service = AuthService(settings)
 idempotency_store = IdempotencyStore(settings)
 audit_log = AuditLogService(settings)
 usage_service = UsageService(settings)
+billing_service = BillingService(settings)
 backup_service = BackupService(settings)
 organization_service = OrganizationService(settings)
 consent_service = ConsentService(settings)
@@ -163,7 +166,15 @@ async def api_key_middleware(request: Request, call_next):
     request.state.request_id = request_id
     if _request_body_is_too_large(request):
         return _error_response(413, "Request body too large", request_id)
-    public_paths = {"/health", "/ready", "/providers", "/openapi.json", "/auth/register", "/auth/login"}
+    public_paths = {
+        "/health",
+        "/ready",
+        "/providers",
+        "/openapi.json",
+        "/auth/register",
+        "/auth/login",
+        "/billing/stripe/webhook",
+    }
     is_docs_path = request.url.path in {"/docs", "/redoc"} or request.url.path.startswith("/docs/")
     is_public_path = request.url.path in public_paths or is_docs_path
     if settings.app_env not in {"local", "test", "dev", "development"} and not settings.api_key and not is_public_path:
@@ -603,16 +614,17 @@ def _project_count_for_user(user: PlatformUser | None) -> int:
 
 
 def _usage_limits(user: PlatformUser | None) -> dict[str, int]:
+    entitlements = billing_service.entitlements_for_user(user)
     return {
-        "max_projects": settings.usage_max_projects_per_user,
-        "max_active_jobs": settings.usage_max_active_jobs_per_user,
+        "max_projects": entitlements.max_projects,
+        "max_active_jobs": entitlements.max_active_jobs,
         "current_projects": _project_count_for_user(user),
         "current_active_jobs": _active_job_count_for_user(user),
     }
 
 
 def _enforce_project_quota(user: PlatformUser | None) -> None:
-    limit = settings.usage_max_projects_per_user
+    limit = billing_service.entitlements_for_user(user).max_projects
     if limit <= 0:
         return
     current = _project_count_for_user(user)
@@ -629,7 +641,7 @@ def _enforce_project_quota(user: PlatformUser | None) -> None:
 
 
 def _enforce_active_job_quota(user: PlatformUser | None) -> None:
-    limit = settings.usage_max_active_jobs_per_user
+    limit = billing_service.entitlements_for_user(user).max_active_jobs
     if limit <= 0:
         return
     current = _active_job_count_for_user(user)
@@ -939,6 +951,7 @@ def diagnostics() -> dict:
             "script_default": settings.default_script_provider,
             "voice_default": settings.default_voice_provider,
         },
+        "billing": billing_service.metadata(),
         "jobs": {
             "run_inline": settings.run_jobs_inline,
             "workers": settings.job_workers,
@@ -1014,6 +1027,57 @@ def logout_user(request: Request) -> dict:
     if user:
         _audit(request, "auth.logout", actor_id=user.id, resource_type="user", resource_id=user.id)
     return {"revoked": revoked}
+
+
+@app.get("/billing/me")
+def billing_me(request: Request) -> dict:
+    user = _require_user_auth(request)
+    payload = billing_service.account_payload(user)
+    payload["usage_limits"] = _usage_limits(user)
+    return payload
+
+
+@app.post("/billing/checkout")
+def create_billing_checkout(payload: BillingCheckoutCreate, request: Request) -> dict:
+    user = _require_user_auth(request)
+    try:
+        session = billing_service.create_checkout_session(user, payload)
+    except BillingNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    _audit(
+        request,
+        "billing.checkout.create",
+        actor_id=user.id,
+        resource_type="user",
+        resource_id=user.id,
+        metadata={"plan": payload.plan, "price_id": payload.price_id or settings.stripe_pro_price_id},
+    )
+    return session
+
+
+@app.post("/billing/portal")
+def create_billing_portal(request: Request) -> dict:
+    user = _require_user_auth(request)
+    try:
+        session = billing_service.create_portal_session(user)
+    except BillingNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except BillingAccountNotFoundError:
+        raise HTTPException(status_code=404, detail="Billing account not found") from None
+    _audit(request, "billing.portal.create", actor_id=user.id, resource_type="user", resource_id=user.id)
+    return session
+
+
+@app.post("/billing/stripe/webhook")
+async def stripe_billing_webhook(request: Request) -> dict:
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+    try:
+        event = billing_service.construct_webhook_event(payload, signature)
+        result = billing_service.handle_webhook_event(event)
+    except Exception as exc:  # noqa: BLE001 - webhook errors must be returned as Stripe-visible 400s
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return result
 
 
 @app.get("/organizations")
@@ -1158,6 +1222,7 @@ def providers() -> dict:
         },
         "project_storage": store.metadata(),
         "artifacts": artifact_store.metadata(),
+        "billing": billing_service.metadata(),
         "jobs": {
             "available": [item.value for item in JobType],
             "run_inline": settings.run_jobs_inline,
@@ -1210,6 +1275,10 @@ def admin_overview(request: Request) -> dict:
         "artifacts": artifact_store.metadata(),
         "jobs": job_store.stats(),
         "usage": usage_service.summary(),
+        "billing": {
+            "metadata": billing_service.metadata(),
+            "account_count": len(billing_service.list_accounts()),
+        },
         "audit_events": len(audit_log.list_events()),
     }
 

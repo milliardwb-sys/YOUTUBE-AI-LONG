@@ -303,6 +303,16 @@ class ConsentRecord(BaseModel):
         return validate_project_id(value.strip())
 
 
+class BillingCheckoutCreate(BaseModel):
+    plan: Literal["pro"] = "pro"
+    price_id: str | None = Field(default=None, max_length=255)
+
+    @field_validator("price_id")
+    @classmethod
+    def strip_price_id(cls, value: str | None) -> str | None:
+        return value.strip() if value else None
+
+
 class SourceCandidate(BaseModel):
     id: str = Field(default_factory=lambda: f"source_{uuid4().hex[:8]}")
     name: str
