@@ -193,20 +193,23 @@ backend/data/projects/_jobs/job_*.json
 curl -X POST http://localhost:8000/projects \
   -H 'Content-Type: application/json' \
   -d '{
-    "topic": "5 AI-сервисов для создания видео в 2026 году",
+    "topic": "AI-аватар показывает 5 сервисов для создания YouTube-видео в 2026 году",
     "duration_minutes": 3,
-    "style": "expert_review",
+    "style": "ai_news_avatar",
     "language": "ru",
     "audience": "создатели YouTube-каналов",
     "visual_mode": "official_sites_plus_ai",
-    "source_urls": ["https://www.heygen.com/", "https://runwayml.com/"],
+    "source_urls": ["https://www.heygen.com/", "https://runwayml.com/", "https://www.synthesia.io/"],
     "script_provider": "template",
     "voice_provider": "placeholder",
     "brand_theme": "neon",
-    "avatar_enabled": false,
-    "burn_subtitles": false
+    "avatar_enabled": true,
+    "avatar_position": "bottom_left",
+    "burn_subtitles": true
   }'
 ```
+
+`style: "ai_news_avatar"` строит ролик в формате AI-ведущего: крупный хук, аватар на весь экран, аватар в углу поверх демонстрации экрана, AI b-roll, доказательные вставки и финальный CTA.
 
 ### 2. Запустить генерацию как job
 
@@ -284,7 +287,7 @@ curl -X POST http://localhost:8000/projects/<project_id>/scenes \
     "narration": "Текст озвучки для новой сцены.",
     "duration_sec": 12,
     "order": 2,
-    "visual_type": "ai_slide"
+    "visual_type": "screen_demo"
   }'
 ```
 

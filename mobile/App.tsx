@@ -30,7 +30,7 @@ import { clearSessionToken, loadSessionToken, saveSessionToken } from './src/ses
 import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UsageOverview, UserPublic } from './src/types';
 
 export default function App() {
-  const [topic, setTopic] = useState('5 AI-сервисов для создания видео в 2026 году');
+  const [topic, setTopic] = useState('AI-аватар показывает 5 сервисов для создания YouTube-видео в 2026 году');
   const [useOfficialSources, setUseOfficialSources] = useState(true);
   const [useLlmScript, setUseLlmScript] = useState(false);
   const [useTtsVoice, setUseTtsVoice] = useState(false);
@@ -106,7 +106,7 @@ export default function App() {
       setJob(queuedJob);
       await pollJob(created.id, queuedJob);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : 'Неизвестная ошибка');
     } finally {
       setLoading(false);
     }
@@ -124,7 +124,7 @@ export default function App() {
       await refreshProjects();
       await refreshAuditEvents();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Auth failed');
+      setError(err instanceof Error ? err.message : 'Ошибка авторизации');
     } finally {
       setAuthBusy(false);
     }
@@ -136,7 +136,7 @@ export default function App() {
     try {
       await logoutUser();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Logout failed');
+      setError(err instanceof Error ? err.message : 'Не удалось выйти');
     } finally {
       await clearSessionToken();
       setAccessToken(null);
@@ -156,7 +156,7 @@ export default function App() {
     try {
       setProjects(await listProjects());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load projects failed');
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить проекты');
     } finally {
       setProjectsLoading(false);
     }
@@ -167,7 +167,7 @@ export default function App() {
     try {
       setAuditEvents(await getAuditEvents());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load audit events failed');
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить аудит');
     } finally {
       setAuditLoading(false);
     }
@@ -178,7 +178,7 @@ export default function App() {
     try {
       setUsage(await getUsageMe());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Load usage failed');
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить лимиты');
     } finally {
       setUsageLoading(false);
     }
@@ -202,7 +202,7 @@ export default function App() {
       selectScene(selected.scenes?.[0] ?? null);
       await refreshAuditEvents();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Open project failed');
+      setError(err instanceof Error ? err.message : 'Не удалось открыть проект');
     } finally {
       setLoading(false);
     }
@@ -222,7 +222,7 @@ export default function App() {
       await refreshAuditEvents();
       await refreshUsage();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Duplicate project failed');
+      setError(err instanceof Error ? err.message : 'Не удалось скопировать проект');
     } finally {
       setLoading(false);
     }
@@ -242,7 +242,7 @@ export default function App() {
       await refreshAuditEvents();
       await refreshUsage();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete project failed');
+      setError(err instanceof Error ? err.message : 'Не удалось удалить проект');
     } finally {
       setLoading(false);
     }
@@ -265,10 +265,10 @@ export default function App() {
     await refreshAuditEvents();
     await refreshUsage();
     if (currentJob.status === 'failed') {
-      setError(currentJob.error ?? finalProject.error ?? 'Generation job failed');
+      setError(currentJob.error ?? finalProject.error ?? 'Задача генерации завершилась ошибкой');
     }
     if (currentJob.status === 'cancelled') {
-      setError(currentJob.error ?? 'Generation job cancelled');
+      setError(currentJob.error ?? 'Задача генерации отменена');
     }
   }
 
@@ -287,7 +287,7 @@ export default function App() {
       }
       setLoading(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Cancel failed');
+      setError(err instanceof Error ? err.message : 'Не удалось отменить задачу');
     }
   }
 
@@ -303,7 +303,7 @@ export default function App() {
       await refreshAuditEvents();
       await refreshUsage();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Retry failed');
+      setError(err instanceof Error ? err.message : 'Не удалось повторить задачу');
     } finally {
       setLoading(false);
     }
@@ -332,7 +332,7 @@ export default function App() {
       await refreshActiveProject(updated);
       selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save scene failed');
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить сцену');
     } finally {
       setLoading(false);
     }
@@ -344,14 +344,14 @@ export default function App() {
     setError(null);
     try {
       const updated = await insertScene(project.id, {
-        title: sceneTitle.trim() || 'Manual scene',
-        narration: sceneNarration.trim() || 'Manual narration for the new scene.',
+        title: sceneTitle.trim() || 'Ручная сцена',
+        narration: sceneNarration.trim() || 'Ручной текст диктора для новой сцены.',
         duration_sec: Math.max(5, Math.min(240, Number.parseInt(sceneDuration, 10) || 12)),
       });
       await refreshActiveProject(updated);
       selectScene(updated.scenes[updated.scenes.length - 1] ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Add scene failed');
+      setError(err instanceof Error ? err.message : 'Не удалось добавить сцену');
     } finally {
       setLoading(false);
     }
@@ -366,7 +366,7 @@ export default function App() {
       await refreshActiveProject(updated);
       selectScene(updated.scenes[0] ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete scene failed');
+      setError(err instanceof Error ? err.message : 'Не удалось удалить сцену');
     } finally {
       setLoading(false);
     }
@@ -381,7 +381,7 @@ export default function App() {
       await refreshActiveProject(updated);
       selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Regenerate slide failed');
+      setError(err instanceof Error ? err.message : 'Не удалось пересобрать кадр');
     } finally {
       setLoading(false);
     }
@@ -402,7 +402,7 @@ export default function App() {
       await refreshActiveProject(updated);
       selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Move scene failed');
+      setError(err instanceof Error ? err.message : 'Не удалось переместить сцену');
     } finally {
       setLoading(false);
     }
@@ -420,14 +420,14 @@ export default function App() {
     <SafeAreaView style={styles.safe}>
       <StatusBar style="auto" />
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>AI Video Studio MVP v0.4</Text>
-        <Text style={styles.subtitle}>Тема → job queue → сценарий → источники → голос → слайды → MP4</Text>
+        <Text style={styles.title}>YOUTUBE AI LONG</Text>
+        <Text style={styles.subtitle}>Тема → очередь задач → сценарий → источники → AI-ведущий → MP4</Text>
         <View style={styles.authPanel}>
-          <Text style={styles.sectionTitle}>Account</Text>
+          <Text style={styles.sectionTitle}>Аккаунт</Text>
           {authUser ? (
             <View style={styles.authRow}>
               <Text style={styles.authText}>{authUser.email}</Text>
-              <Button title="Logout" onPress={handleLogout} disabled={authBusy} />
+              <Button title="Выйти" onPress={handleLogout} disabled={authBusy} />
             </View>
           ) : (
             <>
@@ -443,17 +443,17 @@ export default function App() {
                 value={authPassword}
                 onChangeText={setAuthPassword}
                 style={styles.compactInput}
-                placeholder="password"
+                placeholder="пароль"
                 secureTextEntry
               />
               <View style={styles.buttonRow}>
                 <Button
-                  title="Login"
+                  title="Войти"
                   onPress={() => handleAuth('login')}
                   disabled={authBusy || authEmail.trim().length < 3 || authPassword.length < 1}
                 />
                 <Button
-                  title="Register"
+                  title="Создать аккаунт"
                   onPress={() => handleAuth('register')}
                   disabled={authBusy || authEmail.trim().length < 3 || authPassword.length < 8}
                 />
@@ -473,11 +473,11 @@ export default function App() {
 
         <View style={styles.projectListPanel}>
           <View style={styles.authRow}>
-            <Text style={styles.sectionTitle}>Projects</Text>
-            <Button title={projectsLoading ? 'Loading' : 'Refresh'} onPress={refreshProjects} disabled={projectsLoading || loading} />
+            <Text style={styles.sectionTitle}>Проекты</Text>
+            <Button title={projectsLoading ? 'Загрузка' : 'Обновить'} onPress={refreshProjects} disabled={projectsLoading || loading} />
           </View>
           {projects.length === 0 ? (
-            <Text style={styles.emptyText}>No projects loaded</Text>
+            <Text style={styles.emptyText}>Проекты не загружены</Text>
           ) : (
             projects.slice(0, 8).map((item) => (
               <View key={item.id} style={styles.projectListItem}>
@@ -488,7 +488,7 @@ export default function App() {
                   </Text>
                   {item.updated_at ? <Text style={styles.projectListMeta}>{new Date(item.updated_at).toLocaleString()}</Text> : null}
                 </View>
-                <Button title="Open" onPress={() => handleOpenProject(item.id)} disabled={loading} />
+                <Button title="Открыть" onPress={() => handleOpenProject(item.id)} disabled={loading} />
               </View>
             ))
           )}
@@ -496,34 +496,34 @@ export default function App() {
 
         <View style={styles.usagePanel}>
           <View style={styles.authRow}>
-            <Text style={styles.sectionTitle}>Usage</Text>
-            <Button title={usageLoading ? 'Loading' : 'Refresh'} onPress={refreshUsage} disabled={usageLoading || loading} />
+            <Text style={styles.sectionTitle}>Лимиты</Text>
+            <Button title={usageLoading ? 'Загрузка' : 'Обновить'} onPress={refreshUsage} disabled={usageLoading || loading} />
           </View>
           {usage ? (
             <>
               <Text style={styles.usageText}>
-                Projects: {usage.limits.current_projects}/{usage.limits.max_projects || '∞'}
+                Проекты: {usage.limits.current_projects}/{usage.limits.max_projects || '∞'}
               </Text>
               <Text style={styles.usageText}>
-                Active jobs: {usage.limits.current_active_jobs}/{usage.limits.max_active_jobs || '∞'}
+                Активные задачи: {usage.limits.current_active_jobs}/{usage.limits.max_active_jobs || '∞'}
               </Text>
               <Text style={styles.usageText}>
-                Estimated cost: ${(usage.usage.estimated_cost_cents / 100).toFixed(2)}
+                Оценка стоимости: ${(usage.usage.estimated_cost_cents / 100).toFixed(2)}
               </Text>
-              <Text style={styles.usageMeta}>Events: {usage.usage.event_count} · Units: {usage.usage.total_units}</Text>
+              <Text style={styles.usageMeta}>События: {usage.usage.event_count} · Единицы: {usage.usage.total_units}</Text>
             </>
           ) : (
-            <Text style={styles.emptyText}>No usage loaded</Text>
+            <Text style={styles.emptyText}>Лимиты не загружены</Text>
           )}
         </View>
 
         <View style={styles.auditPanel}>
           <View style={styles.authRow}>
-            <Text style={styles.sectionTitle}>Audit log</Text>
-            <Button title={auditLoading ? 'Loading' : 'Refresh'} onPress={refreshAuditEvents} disabled={auditLoading || loading} />
+            <Text style={styles.sectionTitle}>Журнал аудита</Text>
+            <Button title={auditLoading ? 'Загрузка' : 'Обновить'} onPress={refreshAuditEvents} disabled={auditLoading || loading} />
           </View>
           {auditEvents.length === 0 ? (
-            <Text style={styles.emptyText}>No audit events loaded</Text>
+            <Text style={styles.emptyText}>События аудита не загружены</Text>
           ) : (
             auditEvents.slice(0, 8).map((event) => (
               <View key={event.id} style={styles.auditItem}>
@@ -562,9 +562,9 @@ export default function App() {
           onValueChange={setBurnSubtitles}
         />
 
-        <Button title="Создать ролик через job queue" onPress={handleGenerate} disabled={loading || topic.trim().length < 5} />
-        {canCancel ? <Button title="Отменить job" onPress={handleCancelJob} /> : null}
-        {canRetry ? <Button title="Повторить job" onPress={handleRetryJob} disabled={loading} /> : null}
+        <Button title="Создать ролик с AI-ведущим" onPress={handleGenerate} disabled={loading || topic.trim().length < 5} />
+        {canCancel ? <Button title="Отменить задачу" onPress={handleCancelJob} /> : null}
+        {canRetry ? <Button title="Повторить задачу" onPress={handleRetryJob} disabled={loading} /> : null}
 
         {loading && (
           <View style={styles.loading}>
@@ -582,92 +582,92 @@ export default function App() {
         {project && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{project.topic}</Text>
-            <Text>Project ID: {project.id}</Text>
-            <Text>Status: {project.status}</Text>
-            <Text>Step: {project.current_step}</Text>
+            <Text>ID проекта: {project.id}</Text>
+            <Text>Статус: {project.status}</Text>
+            <Text>Шаг: {project.current_step}</Text>
             <View style={styles.buttonRow}>
-              <Button title="Duplicate" onPress={handleDuplicateProject} disabled={loading} />
-              <Button title="Delete" onPress={handleDeleteProject} disabled={loading} />
+              <Button title="Копировать" onPress={handleDuplicateProject} disabled={loading} />
+              <Button title="Удалить" onPress={handleDeleteProject} disabled={loading} />
             </View>
-            {job ? <Text>Job: {job.status} · {job.progress}% · {job.current_step}</Text> : null}
+            {job ? <Text>Задача: {job.status} · {job.progress}% · {job.current_step}</Text> : null}
             {job?.events?.slice(-5).map((event, index) => (
               <Text key={`${event.created_at}-${index}`} style={styles.event}>
                 {event.event}: {event.message ?? event.progress ?? ''}
               </Text>
             ))}
-            <Text>Script: {project.script_provider ?? '—'}</Text>
-            <Text>Voice: {project.voice_provider ?? '—'}</Text>
-            <Text>Scenes: {project.scenes?.length ?? 0}</Text>
-            <Text>Sources: {project.sources?.length ?? 0}</Text>
+            <Text>Сценарий: {project.script_provider ?? '—'}</Text>
+            <Text>Голос: {project.voice_provider ?? '—'}</Text>
+            <Text>Сцен: {project.scenes?.length ?? 0}</Text>
+            <Text>Источников: {project.sources?.length ?? 0}</Text>
             <View style={styles.sceneEditorPanel}>
-              <Text style={styles.cardTitle}>Scene editor</Text>
+              <Text style={styles.cardTitle}>Редактор сцен</Text>
               {project.scenes?.length ? (
                 project.scenes.slice(0, 8).map((scene) => (
                   <View key={scene.id} style={styles.scenePickerRow}>
                     <Text style={styles.scenePickerText}>
                       #{scene.order} {scene.title}
                     </Text>
-                    <Button title={scene.id === selectedSceneId ? 'Selected' : 'Edit'} onPress={() => selectScene(scene)} />
+                    <Button title={scene.id === selectedSceneId ? 'Выбрана' : 'Править'} onPress={() => selectScene(scene)} />
                   </View>
                 ))
               ) : (
-                <Text style={styles.event}>No scenes yet</Text>
+                <Text style={styles.event}>Сцен пока нет</Text>
               )}
               <TextInput
                 value={sceneTitle}
                 onChangeText={setSceneTitle}
                 style={styles.compactInput}
-                placeholder="scene title"
+                placeholder="название сцены"
               />
               <TextInput
                 value={sceneNarration}
                 onChangeText={setSceneNarration}
                 multiline
                 style={[styles.compactInput, styles.sceneNarrationInput]}
-                placeholder="scene narration"
+                placeholder="текст диктора"
               />
               <TextInput
                 value={sceneDuration}
                 onChangeText={setSceneDuration}
                 style={styles.compactInput}
-                placeholder="duration seconds"
+                placeholder="длительность в секундах"
                 keyboardType="numeric"
               />
               <View style={styles.buttonRow}>
-                <Button title="Save" onPress={handleSaveScene} disabled={loading || !selectedScene || sceneTitle.trim().length < 1} />
-                <Button title="Add" onPress={handleAddScene} disabled={loading || sceneTitle.trim().length < 1} />
+                <Button title="Сохранить" onPress={handleSaveScene} disabled={loading || !selectedScene || sceneTitle.trim().length < 1} />
+                <Button title="Добавить" onPress={handleAddScene} disabled={loading || sceneTitle.trim().length < 1} />
               </View>
               <View style={styles.buttonRow}>
-                <Button title="Delete" onPress={handleDeleteScene} disabled={loading || !selectedScene} />
-                <Button title="Regen slide" onPress={handleRegenerateSceneSlide} disabled={loading || !selectedScene} />
+                <Button title="Удалить" onPress={handleDeleteScene} disabled={loading || !selectedScene} />
+                <Button title="Пересобрать кадр" onPress={handleRegenerateSceneSlide} disabled={loading || !selectedScene} />
               </View>
               <View style={styles.buttonRow}>
-                <Button title="Move up" onPress={() => handleMoveScene(-1)} disabled={loading || !canMoveSceneUp} />
-                <Button title="Move down" onPress={() => handleMoveScene(1)} disabled={loading || !canMoveSceneDown} />
+                <Button title="Выше" onPress={() => handleMoveScene(-1)} disabled={loading || !canMoveSceneUp} />
+                <Button title="Ниже" onPress={() => handleMoveScene(1)} disabled={loading || !canMoveSceneDown} />
               </View>
             </View>
             {manifest ? (
               <View style={styles.manifestBox}>
-                <Text style={styles.manifestTitle}>Manifest: {manifest.readiness.publish_ready ? 'publish ready' : 'not ready'}</Text>
-                <Text>Artifacts: {manifest.counts.ready_artifacts}/{manifest.counts.expected_artifacts}</Text>
-                <Text>Visuals: {manifest.counts.scenes_with_visuals}/{manifest.counts.scenes}</Text>
-                <Text>Voice: {manifest.counts.scenes_with_audio}/{manifest.counts.scenes}</Text>
+                <Text style={styles.manifestTitle}>Манифест: {manifest.readiness.publish_ready ? 'готов к публикации' : 'не готов'}</Text>
+                <Text>Артефакты: {manifest.counts.ready_artifacts}/{manifest.counts.expected_artifacts}</Text>
+                <Text>Визуалы: {manifest.counts.scenes_with_visuals}/{manifest.counts.scenes}</Text>
+                <Text>Голос: {manifest.counts.scenes_with_audio}/{manifest.counts.scenes}</Text>
                 {manifest.missing_artifacts.length ? (
-                  <Text style={styles.warning}>Missing: {manifest.missing_artifacts.join(', ')}</Text>
+                  <Text style={styles.warning}>Не хватает: {manifest.missing_artifacts.join(', ')}</Text>
                 ) : null}
               </View>
             ) : null}
             {project.result?.final_video_url ? (
-              <Text style={styles.link}>Video: {project.result.final_video_url}</Text>
+              <Text style={styles.link}>Видео: {project.result.final_video_url}</Text>
             ) : null}
             {project.result?.thumbnail_url ? (
-              <Text style={styles.link}>Thumbnail: {project.result.thumbnail_url}</Text>
+              <Text style={styles.link}>Обложка: {project.result.thumbnail_url}</Text>
             ) : null}
             {project.result?.quality_report_url ? (
-              <Text style={styles.link}>Quality: {project.result.quality_report_url}</Text>
+              <Text style={styles.link}>Отчет качества: {project.result.quality_report_url}</Text>
             ) : null}
             {project.result?.export_package_url ? (
-              <Text style={styles.link}>Package: {project.result.export_package_url}</Text>
+              <Text style={styles.link}>Пакет экспорта: {project.result.export_package_url}</Text>
             ) : null}
             {project.scenes?.slice(0, 5).map((scene) => (
               <Text key={scene.id} style={styles.scene}>#{scene.order} {scene.title} · {scene.visual_type}</Text>

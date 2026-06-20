@@ -32,19 +32,19 @@ def main() -> None:
     store = ProjectStore(settings)
     project = store.create_project(
         ProjectCreate(
-            topic="5 AI-сервисов для создания видео в 2026 году",
-            duration_minutes=1,
-            style=VideoStyle.expert_review,
+            topic="AI-аватар показывает 5 сервисов для создания YouTube-видео в 2026 году",
+            duration_minutes=2,
+            style=VideoStyle.ai_news_avatar,
             language="ru",
             audience="создатели YouTube-каналов",
             visual_mode=VisualMode.official_sites_plus_ai,
-            source_urls=["https://www.heygen.com/", "https://runwayml.com/"],
+            source_urls=["https://www.heygen.com/", "https://runwayml.com/", "https://www.synthesia.io/"],
             script_provider=ScriptProviderName.template,
             voice_provider=VoiceProviderName.placeholder,
             brand_theme=BrandTheme.neon,
             avatar_enabled=True,
-            avatar_position="bottom_right",
-            burn_subtitles=False,
+            avatar_position="bottom_left",
+            burn_subtitles=True,
         )
     )
     pipeline = build_pipeline(store)

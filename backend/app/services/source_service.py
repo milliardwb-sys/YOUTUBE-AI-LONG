@@ -178,7 +178,7 @@ class SourceService:
             return
         source_index = 0
         for scene in project.scenes:
-            if scene.visual_type != "screenshot":
+            if scene.visual_type not in {"screenshot", "screen_demo"}:
                 continue
             source = project.sources[source_index % len(project.sources)]
             scene.source_id = source.id

@@ -45,6 +45,18 @@ class VisualService:
             template = self._template_for_scene(project, scene)
             if scene.visual_type == "screenshot" and source and source.screenshot_path:
                 self._render_source_scene_slide(project, scene, source, slide_path, template)
+            elif scene.visual_type == "screen_demo":
+                self._render_screen_demo_slide(project, scene, source, slide_path, template)
+            elif scene.visual_type == "avatar_fullscreen":
+                self._render_avatar_fullscreen_slide(project, scene, slide_path, template)
+            elif scene.visual_type == "avatar_pip":
+                self._render_avatar_pip_slide(project, scene, slide_path, template)
+            elif scene.visual_type == "ai_broll":
+                self._render_ai_broll_slide(project, scene, slide_path, template)
+            elif scene.visual_type == "big_caption":
+                self._render_big_caption_slide(project, scene, slide_path, template)
+            elif scene.visual_type == "cta":
+                self._render_cta_slide(project, scene, slide_path, template)
             elif scene.visual_type == "table":
                 self._render_table_slide(project, scene, slide_path, template)
             elif scene.visual_type == "diagram":
@@ -71,6 +83,18 @@ class VisualService:
         template = self._template_for_scene(project, scene)
         if scene.visual_type == "screenshot" and source and source.screenshot_path:
             self._render_source_scene_slide(project, scene, source, slide_path, template)
+        elif scene.visual_type == "screen_demo":
+            self._render_screen_demo_slide(project, scene, source, slide_path, template)
+        elif scene.visual_type == "avatar_fullscreen":
+            self._render_avatar_fullscreen_slide(project, scene, slide_path, template)
+        elif scene.visual_type == "avatar_pip":
+            self._render_avatar_pip_slide(project, scene, slide_path, template)
+        elif scene.visual_type == "ai_broll":
+            self._render_ai_broll_slide(project, scene, slide_path, template)
+        elif scene.visual_type == "big_caption":
+            self._render_big_caption_slide(project, scene, slide_path, template)
+        elif scene.visual_type == "cta":
+            self._render_cta_slide(project, scene, slide_path, template)
         elif scene.visual_type == "table":
             self._render_table_slide(project, scene, slide_path, template)
         elif scene.visual_type == "diagram":
@@ -196,6 +220,208 @@ class VisualService:
         self._draw_footer(draw, project, scene, template.footer_label)
         image.save(path, "PNG", optimize=True)
 
+    def _render_avatar_fullscreen_slide(self, project: Project, scene: Scene, path: Path, template: SlideTemplate) -> None:
+        image, draw = self._base_image(scene.order, template)
+        self._draw_header(draw, project, scene, template)
+        self._draw_avatar_portrait(draw, [self.width - 710, 190, self.width - 135, self.height - 120], fullscreen=True)
+        self._draw_caption_words(draw, scene.on_screen_text, [95, 225, self.width - 780, 545], template)
+        self._draw_burned_caption(draw, scene.narration, template)
+        self._draw_footer(draw, project, scene, template.footer_label)
+        image.save(path, "PNG", optimize=True)
+
+    def _render_avatar_pip_slide(self, project: Project, scene: Scene, path: Path, template: SlideTemplate) -> None:
+        image, draw = self._base_image(scene.order, template)
+        self._draw_header(draw, project, scene, template)
+        self._draw_mock_browser(draw, [110, 210, self.width - 110, self.height - 170], scene, template)
+        self._draw_pip_avatar(draw, project, scene, x=120, y=self.height - 390)
+        self._draw_burned_caption(draw, scene.narration, template)
+        self._draw_footer(draw, project, scene, template.footer_label)
+        image.save(path, "PNG", optimize=True)
+
+    def _render_screen_demo_slide(
+        self,
+        project: Project,
+        scene: Scene,
+        source: SourceCandidate | None,
+        path: Path,
+        template: SlideTemplate,
+    ) -> None:
+        image, draw = self._base_image(scene.order, template)
+        self._draw_header(draw, project, scene, template)
+        box = [105, 185, self.width - 95, self.height - 145]
+        self._draw_browser_card(draw, box, template)
+        if source and source.screenshot_path:
+            try:
+                source_image = Image.open(source.screenshot_path).convert("RGB")
+                self._paste_contained(image, source_image, [box[0] + 32, box[1] + 86, box[2] - 32, box[3] - 32])
+            except Exception:  # noqa: BLE001
+                self._draw_mock_screen_content(draw, box, scene, template)
+        else:
+            self._draw_mock_screen_content(draw, box, scene, template)
+        self._draw_cursor(draw, self.width - 465, self.height - 355)
+        self._draw_pip_avatar(draw, project, scene, x=125, y=self.height - 385)
+        self._draw_footer(draw, project, scene, template.footer_label)
+        image.save(path, "PNG", optimize=True)
+
+    def _render_ai_broll_slide(self, project: Project, scene: Scene, path: Path, template: SlideTemplate) -> None:
+        image, draw = self._base_image(scene.order, template)
+        self._draw_header(draw, project, scene, template)
+        center_x = self.width // 2
+        center_y = self.height // 2 + 10
+        accent = template.palette["accent"]
+        for radius, width in [(360, 8), (285, 5), (210, 3)]:
+            draw.ellipse(
+                [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+                outline=(accent[0], accent[1], accent[2]),
+                width=width,
+            )
+        for idx in range(34):
+            x = 160 + ((idx * 137) % (self.width - 320))
+            y = 210 + ((idx * 83) % (self.height - 420))
+            size = 7 + (idx % 4) * 3
+            draw.ellipse([x, y, x + size, y + size], fill=(235, 245, 255))
+        title = scene.on_screen_text.upper()
+        lines = wrap_text(title, width=14)[:2]
+        y = center_y - 115
+        for line in lines:
+            draw.text((center_x - self._text_width(draw, line, self.font_title) // 2, y), line, font=self.font_title, fill=template.palette["title"])
+            y += 105
+        self._draw_burned_caption(draw, scene.goal.capitalize(), template)
+        self._draw_footer(draw, project, scene, template.footer_label)
+        image.save(path, "PNG", optimize=True)
+
+    def _render_big_caption_slide(self, project: Project, scene: Scene, path: Path, template: SlideTemplate) -> None:
+        image, draw = self._base_image(scene.order, template)
+        self._draw_caption_words(draw, scene.on_screen_text, [105, 185, self.width - 105, self.height - 260], template, center=True)
+        self._draw_burned_caption(draw, scene.narration, template)
+        self._draw_footer(draw, project, scene, template.footer_label)
+        image.save(path, "PNG", optimize=True)
+
+    def _render_cta_slide(self, project: Project, scene: Scene, path: Path, template: SlideTemplate) -> None:
+        image, draw = self._base_image(scene.order, template)
+        self._draw_header(draw, project, scene, template)
+        draw.text((115, 220), "Следующий шаг", font=self.font_small, fill=template.palette["muted_text"])
+        y = 275
+        for line in wrap_text(scene.on_screen_text, width=22)[:3]:
+            draw.text((110, y), line, font=self.font_title, fill=template.palette["title"])
+            y += 94
+        cta_box = [110, 505, self.width - 110, 760]
+        draw.rounded_rectangle(cta_box, radius=34, fill=template.palette["surface"], outline=template.palette["surface_outline"], width=3)
+        cta_lines = [
+            "1. Напишите в комментариях нишу или AI-инструмент.",
+            "2. Сохраните ролик как шаблон для следующего выпуска.",
+            "3. Подключите реальный avatar/video provider перед публикацией.",
+        ]
+        y = cta_box[1] + 45
+        for line in cta_lines:
+            draw.text((cta_box[0] + 45, y), line, font=self.font_small, fill=template.palette["surface_text"])
+            y += 58
+        self._draw_pip_avatar(draw, project, scene, x=self.width - 380, y=210)
+        self._draw_footer(draw, project, scene, template.footer_label)
+        image.save(path, "PNG", optimize=True)
+
+    def _draw_avatar_portrait(self, draw: ImageDraw.ImageDraw, box: list[int], *, fullscreen: bool = False) -> None:
+        x1, y1, x2, y2 = box
+        draw.rounded_rectangle(box, radius=44 if fullscreen else 26, fill=(245, 247, 251), outline=(255, 255, 255), width=5)
+        face_cx = (x1 + x2) // 2
+        face_cy = y1 + int((y2 - y1) * 0.34)
+        face_r = int((x2 - x1) * 0.16)
+        draw.ellipse([face_cx - face_r, face_cy - face_r, face_cx + face_r, face_cy + face_r], fill=(222, 184, 150), outline=(35, 42, 60), width=3)
+        draw.arc([face_cx - face_r, face_cy - face_r - 8, face_cx + face_r, face_cy + face_r], 205, 335, fill=(18, 24, 38), width=16)
+        shoulder_top = face_cy + face_r + 24
+        draw.rounded_rectangle([x1 + 120, shoulder_top, x2 - 120, y2 - 50], radius=70, fill=(17, 24, 39))
+        label = "ЦИФРОВОЙ АВАТАР"
+        draw.rounded_rectangle([x1 + 65, y2 - 118, x2 - 65, y2 - 58], radius=18, fill=(10, 18, 32))
+        draw.text((face_cx - self._text_width(draw, label, self.font_tiny) // 2, y2 - 100), label, font=self.font_tiny, fill=(255, 255, 255))
+
+    def _draw_pip_avatar(self, draw: ImageDraw.ImageDraw, project: Project, scene: Scene, *, x: int, y: int) -> None:
+        if not project.avatar_enabled or not scene.avatar_visible:
+            return
+        w, h = 210, 155
+        draw.rounded_rectangle([x - 8, y - 8, x + w + 8, y + h + 8], radius=24, fill=(8, 13, 25))
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=20, fill=(235, 238, 244), outline=(255, 255, 255), width=3)
+        cx, cy = x + w // 2, y + 58
+        draw.ellipse([cx - 34, cy - 34, cx + 34, cy + 34], fill=(222, 184, 150), outline=(28, 36, 52), width=2)
+        draw.rounded_rectangle([x + 56, y + 94, x + w - 56, y + h - 8], radius=38, fill=(15, 23, 42))
+        draw.rounded_rectangle([x + 18, y + h - 38, x + w - 18, y + h - 8], radius=12, fill=(15, 23, 42))
+        draw.text((x + 33, y + h - 35), "AI-ведущий", font=self.font_tiny, fill=(255, 255, 255))
+
+    def _draw_caption_words(
+        self,
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        box: list[int],
+        template: SlideTemplate,
+        *,
+        center: bool = False,
+    ) -> None:
+        x1, y1, x2, _ = box
+        words = wrap_text(text.upper(), width=15)[:4]
+        y = y1
+        for idx, line in enumerate(words):
+            fill = (255, 221, 51) if idx == len(words) - 1 and len(words) > 1 else template.palette["title"]
+            x = x1
+            if center:
+                x = (x1 + x2) // 2 - self._text_width(draw, line, self.font_title) // 2
+            draw.text((x, y), line, font=self.font_title, fill=fill, stroke_width=2, stroke_fill=(0, 0, 0))
+            y += 105
+
+    def _draw_burned_caption(self, draw: ImageDraw.ImageDraw, text: str, template: SlideTemplate) -> None:
+        box = [110, self.height - 235, self.width - 110, self.height - 128]
+        draw.rounded_rectangle(box, radius=26, fill=(0, 0, 0), outline=template.palette["accent"], width=3)
+        lines = wrap_text(text, width=74)[:2]
+        y = box[1] + 22
+        for line in lines:
+            draw.text((box[0] + 34, y), line, font=self.font_small, fill=(255, 255, 255))
+            y += 42
+
+    def _draw_mock_browser(self, draw: ImageDraw.ImageDraw, box: list[int], scene: Scene, template: SlideTemplate) -> None:
+        self._draw_browser_card(draw, box, template)
+        self._draw_mock_screen_content(draw, box, scene, template)
+
+    def _draw_browser_card(self, draw: ImageDraw.ImageDraw, box: list[int], template: SlideTemplate) -> None:
+        draw.rounded_rectangle(box, radius=34, fill=(248, 250, 252), outline=(220, 230, 245), width=3)
+        draw.rounded_rectangle([box[0], box[1], box[2], box[1] + 66], radius=34, fill=(235, 240, 248))
+        for idx, color in enumerate([(239, 68, 68), (245, 158, 11), (34, 197, 94)]):
+            cx = box[0] + 38 + idx * 34
+            draw.ellipse([cx - 9, box[1] + 24, cx + 9, box[1] + 42], fill=color)
+        draw.rounded_rectangle([box[0] + 150, box[1] + 18, box[2] - 70, box[1] + 48], radius=14, fill=(255, 255, 255))
+        draw.text((box[0] + 174, box[1] + 22), "screen-demo.local / proof", font=self.font_tiny, fill=(74, 85, 104))
+
+    def _draw_mock_screen_content(self, draw: ImageDraw.ImageDraw, box: list[int], scene: Scene, template: SlideTemplate) -> None:
+        left = box[0] + 45
+        top = box[1] + 105
+        right = box[2] - 45
+        draw.rounded_rectangle([left, top, right, top + 95], radius=22, fill=(15, 23, 42))
+        draw.text((left + 32, top + 28), scene.on_screen_text, font=self.font_small, fill=(255, 255, 255))
+        y = top + 135
+        for idx, line in enumerate(wrap_text(scene.goal.capitalize(), width=64)[:5]):
+            fill = (226, 232, 240) if idx % 2 == 0 else (203, 213, 225)
+            draw.rounded_rectangle([left, y, right, y + 54], radius=16, fill=fill)
+            draw.text((left + 24, y + 13), line, font=self.font_tiny, fill=(30, 41, 59))
+            y += 70
+        chart_left = right - 420
+        chart_top = box[3] - 245
+        for idx, height in enumerate([80, 130, 95, 170, 120]):
+            x = chart_left + idx * 72
+            draw.rounded_rectangle([x, chart_top + 180 - height, x + 42, chart_top + 180], radius=10, fill=template.palette["accent"])
+
+    def _draw_cursor(self, draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
+        draw.polygon([(x, y), (x, y + 80), (x + 26, y + 58), (x + 57, y + 122), (x + 86, y + 108), (x + 55, y + 47), (x + 92, y + 45)], fill=(255, 255, 255), outline=(15, 23, 42))
+        draw.line([(x + 56, y + 52), (x + 90, y + 122)], fill=(15, 23, 42), width=5)
+
+    def _paste_contained(self, image: Image.Image, source: Image.Image, box: list[int]) -> None:
+        target_w = box[2] - box[0]
+        target_h = box[3] - box[1]
+        source.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
+        paste_x = box[0] + (target_w - source.width) // 2
+        paste_y = box[1] + (target_h - source.height) // 2
+        image.paste(source, (paste_x, paste_y))
+
+    def _text_width(self, draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0]
+
     def _draw_background(self, draw: ImageDraw.ImageDraw, order: int, template: SlideTemplate) -> None:
         for y in range(self.height):
             shade = int(y / self.height * 18)
@@ -227,13 +453,32 @@ class VisualService:
         elif template.layout == "data_board":
             for x in range(120, self.width - 120, 220):
                 draw.line([(x, 220), (x, self.height - 170)], fill=template.palette["grid"], width=2)
+        elif template.layout == "screen_demo":
+            draw.rectangle([0, 150, self.width, self.height - 118], outline=accent, width=5)
+        elif template.layout == "avatar_fullscreen":
+            draw.rounded_rectangle([self.width - 780, 140, self.width - 70, self.height - 105], radius=48, fill=template.palette["panel"])
+        elif template.layout == "big_caption":
+            draw.rounded_rectangle([70, 155, self.width - 70, self.height - 250], radius=40, outline=accent, width=8)
+        elif template.layout == "ai_broll":
+            for x in range(-200, self.width + 220, 180):
+                draw.line([(x, 185), (x + 420, self.height - 160)], fill=template.palette["grid"], width=3)
+        elif template.layout == "cta":
+            draw.rounded_rectangle([80, 185, self.width - 80, self.height - 135], radius=44, outline=accent, width=5)
 
     def _draw_header(self, draw: ImageDraw.ImageDraw, project: Project, scene: Scene, template: SlideTemplate) -> None:
         badge = f"Сцена {scene.order:02d}"
         draw.rounded_rectangle([90, 70, 320, 130], radius=22, fill=template.palette["surface"])
         draw.text((120, 84), badge, font=self.font_small, fill=template.palette["surface_text"])
 
-        style = project.style.value.replace("_", " ")
+        style_labels = {
+            "expert_review": "экспертный разбор",
+            "tutorial": "обучающий ролик",
+            "top_list": "топ-подборка",
+            "trend_analysis": "анализ тренда",
+            "sales_video": "продающее видео",
+            "ai_news_avatar": "AI-ведущий",
+        }
+        style = style_labels.get(project.style.value, project.style.value.replace("_", " "))
         draw.text((350, 84), style, font=self.font_small, fill=template.palette["muted_text"])
         draw.text((self.width - 560, 84), template.name, font=self.font_small, fill=template.palette["muted_text"])
 
@@ -291,54 +536,114 @@ class VisualService:
 
     def _template_for_scene(self, project: Project, scene: Scene) -> SlideTemplate:
         palette = self._palette_for_theme(project.brand_theme, scene.order)
+        if scene.visual_type == "avatar_fullscreen":
+            return SlideTemplate(
+                id="avatar_fullscreen_v1",
+                name="Аватар на весь экран",
+                layout="avatar_fullscreen",
+                palette=palette,
+                title_width=18,
+                body_width=42,
+                footer_label="аватар на весь экран",
+            )
+        if scene.visual_type == "avatar_pip":
+            return SlideTemplate(
+                id="avatar_pip_v1",
+                name="Аватар в углу",
+                layout="avatar_pip",
+                palette=palette,
+                title_width=24,
+                body_width=52,
+                footer_label="picture-in-picture",
+            )
+        if scene.visual_type == "screen_demo":
+            return SlideTemplate(
+                id="screen_demo_v1",
+                name="Демонстрация экрана",
+                layout="screen_demo",
+                palette=palette,
+                title_width=24,
+                body_width=52,
+                footer_label="экран и доказательство",
+            )
+        if scene.visual_type == "ai_broll":
+            return SlideTemplate(
+                id="ai_broll_v1",
+                name="AI-вставка",
+                layout="ai_broll",
+                palette=palette,
+                title_width=18,
+                body_width=44,
+                footer_label="AI b-roll",
+            )
+        if scene.visual_type == "big_caption":
+            return SlideTemplate(
+                id="big_caption_v1",
+                name="Крупный хук",
+                layout="big_caption",
+                palette=palette,
+                title_width=16,
+                body_width=42,
+                footer_label="хук и удержание",
+            )
+        if scene.visual_type == "cta":
+            return SlideTemplate(
+                id="cta_v1",
+                name="Призыв к действию",
+                layout="cta",
+                palette=palette,
+                title_width=22,
+                body_width=46,
+                footer_label="CTA",
+            )
         if scene.visual_type == "screenshot":
             return SlideTemplate(
                 id="source_review_v1",
-                name="Source Review",
+                name="Разбор источника",
                 layout="editorial_split",
                 palette=palette,
                 title_width=22,
                 body_width=34,
-                footer_label="official source review",
+                footer_label="источник",
             )
         if scene.visual_type == "table":
             return SlideTemplate(
                 id="decision_matrix_v1",
-                name="Decision Matrix",
+                name="Матрица выбора",
                 layout="data_board",
                 palette=palette,
                 title_width=28,
                 body_width=44,
-                footer_label="comparison matrix",
+                footer_label="сравнение",
             )
         if scene.visual_type == "diagram":
             return SlideTemplate(
                 id="workflow_map_v1",
-                name="Workflow Map",
+                name="Карта процесса",
                 layout="process_map",
                 palette=palette,
                 title_width=26,
                 body_width=46,
-                footer_label="process map",
+                footer_label="процесс",
             )
         if project.style.value in {"expert_review", "trend_analysis"}:
             return SlideTemplate(
                 id="editorial_brief_v1",
-                name="Editorial Brief",
+                name="Редакционный разбор",
                 layout="editorial_split",
                 palette=palette,
                 title_width=24,
                 body_width=52,
-                footer_label="editorial brief",
+                footer_label="разбор",
             )
         return SlideTemplate(
             id="studio_focus_v1",
-            name="Studio Focus",
+            name="Студийный слайд",
             layout="studio_focus",
             palette=palette,
             title_width=25,
             body_width=50,
-            footer_label="studio slide",
+            footer_label="студийный слайд",
         )
 
     def _palette_for_theme(self, theme: BrandTheme, order: int) -> dict[str, tuple[int, int, int]]:
@@ -392,7 +697,42 @@ class VisualService:
             "layout": template.layout,
             "slide_path": slide_path.as_posix(),
             "palette": {key: list(value) for key, value in template.palette.items()},
+            "avatar_mode": self._avatar_mode_for_scene(scene),
+            "asset_role": self._asset_role_for_scene(scene),
+            "montage_note": self._montage_note_for_scene(scene),
         }
+
+    def _avatar_mode_for_scene(self, scene: Scene) -> str:
+        if scene.visual_type == "avatar_fullscreen":
+            return "fullscreen"
+        if scene.visual_type in {"avatar_pip", "screen_demo", "cta"} and scene.avatar_visible:
+            return "picture_in_picture"
+        return "none"
+
+    def _asset_role_for_scene(self, scene: Scene) -> str:
+        roles = {
+            "avatar_fullscreen": "avatar_host",
+            "avatar_pip": "talking_head_overlay",
+            "screen_demo": "screen_recording_or_source_insert",
+            "ai_broll": "generated_broll",
+            "big_caption": "retention_caption",
+            "cta": "call_to_action",
+            "screenshot": "source_screenshot",
+            "table": "comparison_table",
+            "diagram": "process_diagram",
+        }
+        return roles.get(scene.visual_type, "original_slide")
+
+    def _montage_note_for_scene(self, scene: Scene) -> str:
+        notes = {
+            "avatar_fullscreen": "Держать аватар крупно, фон спокойный, субтитр в нижней зоне.",
+            "avatar_pip": "Аватар в углу поверх доказательного экрана или карточки.",
+            "screen_demo": "Использовать запись экрана, сайт, отчет или fallback-скриншот с курсором.",
+            "ai_broll": "Заменить placeholder на AI-видео/анимацию без чужих YouTube-кадров.",
+            "big_caption": "Крупная фраза для хука, перехода или главного вывода.",
+            "cta": "Финальный призыв: комментарий, подписка, следующий шаг.",
+        }
+        return notes.get(scene.visual_type, scene.notes or "Стандартная сцена проекта.")
 
     def _table_rows(self, project: Project) -> list[list[str]]:
         names = [source.name for source in project.sources[:4]] or ["AI-слайды", "Скриншоты", "Озвучка", "Аватар"]

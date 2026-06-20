@@ -41,8 +41,8 @@ class ScriptService:
 
     def _build_template_scenes(self, project: Project) -> list[Scene]:
         duration_sec = project.duration_minutes * 60
-        scene_count = self._scene_count(duration_sec)
-        base_duration = max(12, duration_sec // scene_count)
+        scene_count = self._scene_count_for_project(project)
+        base_duration = self._base_duration_for_project(project, duration_sec, scene_count)
 
         scene_blueprint = self._blueprint(project.style, scene_count)
         scenes: list[Scene] = []
@@ -51,10 +51,10 @@ class ScriptService:
         for index, item in enumerate(scene_blueprint, start=1):
             is_last = index == len(scene_blueprint)
             duration = duration_sec - start if is_last else base_duration
-            duration = max(8, duration)
-            visual_type = self._visual_type_for(project, index, item["title"], scene_count)
-            narration = self._narration_for(project, index, item["title"], item["goal"])
-            on_screen_text = self._screen_text_for(project, index, item["title"])
+            duration = max(6 if project.style == VideoStyle.ai_news_avatar else 8, duration)
+            visual_type = item.get("visual_type") or self._visual_type_for(project, index, item["title"], scene_count)
+            narration = self._narration_for(project, index, item["title"], item["goal"], visual_type)
+            on_screen_text = item.get("screen_text") or self._screen_text_for(project, index, item["title"])
             scenes.append(
                 Scene(
                     order=index,
@@ -64,10 +64,11 @@ class ScriptService:
                     on_screen_text=on_screen_text,
                     visual_type=visual_type,
                     visual_prompt=self._visual_prompt_for(project, visual_type, item["title"]),
-                    notes="Template-generated scene. Replace with LLM provider for production copy.",
+                    notes=item.get("notes", "Template-generated scene. Replace with LLM provider for production copy."),
                     duration_sec=duration,
                     start_sec=start,
-                    avatar_visible=project.avatar_enabled,
+                    avatar_visible=project.avatar_enabled and visual_type
+                    in {"avatar_fullscreen", "avatar_pip", "screen_demo", "ai_broll", "cta"},
                 )
             )
             start += duration
@@ -102,6 +103,17 @@ class ScriptService:
             start += duration
         return normalized
 
+    def _scene_count_for_project(self, project: Project) -> int:
+        duration_sec = project.duration_minutes * 60
+        if project.style == VideoStyle.ai_news_avatar:
+            return max(7, min(22, duration_sec // 8))
+        return self._scene_count(duration_sec)
+
+    def _base_duration_for_project(self, project: Project, duration_sec: int, scene_count: int) -> int:
+        if project.style == VideoStyle.ai_news_avatar:
+            return max(6, duration_sec // scene_count)
+        return max(12, duration_sec // scene_count)
+
     def _scene_count(self, duration_sec: int) -> int:
         if duration_sec <= 180:
             return 8
@@ -110,6 +122,92 @@ class ScriptService:
         return 16
 
     def _blueprint(self, style: VideoStyle, count: int) -> list[dict[str, str]]:
+        if style == VideoStyle.ai_news_avatar:
+            titles = [
+                {
+                    "title": "Хук",
+                    "goal": "зацепить зрителя громким AI-обещанием в первые секунды",
+                    "screen_text": "ЭТО МЕНЯЕТ ВСЁ",
+                    "visual_type": "big_caption",
+                    "notes": "Julian-style opening: huge text, fast motion, no slow intro.",
+                },
+                {
+                    "title": "Цифровой ведущий",
+                    "goal": "представить аватар и объяснить, почему новость важна",
+                    "screen_text": "AI-аватар объясняет",
+                    "visual_type": "avatar_fullscreen",
+                    "notes": "Fullscreen avatar beat with burned caption space.",
+                },
+                {
+                    "title": "Боль",
+                    "goal": "показать проблему: ручной монтаж, забывающие AI-инструменты, хаос источников",
+                    "screen_text": "Проблема: видео слишком долго делать",
+                    "visual_type": "avatar_pip",
+                    "notes": "Talking-head in corner over problem/proof board.",
+                },
+                {
+                    "title": "Что изменилось",
+                    "goal": "показать интерфейс или страницу продукта как доказательство",
+                    "screen_text": "Смотрим на экран",
+                    "visual_type": "screen_demo",
+                    "notes": "Screen recording/source insert with avatar picture-in-picture.",
+                },
+                {
+                    "title": "Демо процесса",
+                    "goal": "разложить путь от темы до готового ролика",
+                    "screen_text": "Тема → сценарий → аватар → рендер",
+                    "visual_type": "screen_demo",
+                    "notes": "Interface walkthrough beat.",
+                },
+                {
+                    "title": "AI-вставка",
+                    "goal": "дать динамичную сгенерированную перебивку вместо статичного слайда",
+                    "screen_text": "AI B-ROLL",
+                    "visual_type": "ai_broll",
+                    "notes": "Generated/cinematic b-roll placeholder for external AI video provider.",
+                },
+                {
+                    "title": "Бизнес-пример",
+                    "goal": "перевести функцию в практическую пользу для автора или агентства",
+                    "screen_text": "Как это экономит часы",
+                    "visual_type": "avatar_pip",
+                    "notes": "Avatar PIP over practical example.",
+                },
+                {
+                    "title": "Доказательство",
+                    "goal": "показать отчет, таблицу, сайт, код или скрин результата",
+                    "screen_text": "Доказательство на экране",
+                    "visual_type": "screen_demo",
+                    "notes": "Internet/source insert or generated report card.",
+                },
+                {
+                    "title": "Вывод",
+                    "goal": "сформулировать главный инсайт ролика одной фразой",
+                    "screen_text": "Главный вывод",
+                    "visual_type": "big_caption",
+                    "notes": "High-contrast takeaway beat.",
+                },
+                {
+                    "title": "Призыв",
+                    "goal": "дать комментарий, подписку или следующий шаг",
+                    "screen_text": "Напишите нишу в комментариях",
+                    "visual_type": "cta",
+                    "notes": "Final CTA with avatar or brand panel.",
+                },
+            ]
+            while len(titles) < count:
+                insert_at = max(4, len(titles) - 2)
+                titles.insert(
+                    insert_at,
+                    {
+                        "title": f"Быстрая вставка {len(titles) - 7}",
+                        "goal": "сменить визуал и удержать темп ролика",
+                        "screen_text": "Еще один экран",
+                        "visual_type": "screen_demo" if len(titles) % 2 else "ai_broll",
+                        "notes": "Extra Julian-style visual beat for retention.",
+                    },
+                )
+            return titles[:count]
         if style == VideoStyle.tutorial:
             titles = [
                 ("Хук", "зацепить зрителя и показать результат"),
@@ -182,6 +280,18 @@ class ScriptService:
 
     def _visual_prompt_for(self, project: Project, visual_type: str, title: str) -> str:
         base = f"{project.brand_theme.value} YouTube explainer slide for '{title}' about {project.topic}"
+        if visual_type == "avatar_fullscreen":
+            return base + "; fullscreen AI avatar host, studio background, large burned captions, high retention opener"
+        if visual_type == "avatar_pip":
+            return base + "; screen content with small AI avatar picture-in-picture in the corner"
+        if visual_type == "screen_demo":
+            return base + "; browser/screen recording insert, cursor highlight, product UI proof, avatar PIP"
+        if visual_type == "ai_broll":
+            return base + "; cinematic AI-generated b-roll, 3D logo, particles, no copyrighted footage"
+        if visual_type == "big_caption":
+            return base + "; huge high-contrast caption words, motion-title style, thumbnail energy"
+        if visual_type == "cta":
+            return base + "; final call-to-action screen, comment prompt, subscribe/next step"
         if visual_type == "screenshot":
             return base + "; use official website screenshot/card with highlight and short labels"
         if visual_type == "table":
@@ -190,9 +300,11 @@ class ScriptService:
             return base + "; simple process diagram with arrows"
         return base + "; original AI-style visual, no third-party YouTube frames"
 
-    def _narration_for(self, project: Project, index: int, title: str, goal: str) -> str:
+    def _narration_for(self, project: Project, index: int, title: str, goal: str, visual_type: str = "ai_slide") -> str:
         topic = project.topic
         audience = project.audience
+        if project.style == VideoStyle.ai_news_avatar:
+            return self._ai_news_avatar_narration(project, index, title, goal, visual_type)
         if project.language == "en":
             return (
                 f"Scene {index}. {title}. In this part we discuss {topic}. "
@@ -205,6 +317,32 @@ class ScriptService:
             f"Задача сцены — {goal} для аудитории: {audience}. "
             "Это черновой текст из MVP-генератора. На следующем этапе сюда подключается "
             "реальная языковая модель, проверенные источники, голос пользователя и аватар."
+        )
+
+    def _ai_news_avatar_narration(self, project: Project, index: int, title: str, goal: str, visual_type: str) -> str:
+        topic = project.topic
+        audience = project.audience
+        if project.language == "en":
+            openings = {
+                "big_caption": f"New update: {topic}. This is the kind of change most people will miss, but it can completely change the workflow.",
+                "avatar_fullscreen": f"I am the digital host for this AI news breakdown. In this scene, I will show why {topic} matters right now.",
+                "avatar_pip": f"Here is the problem for {audience}: the work is scattered across tools, and every manual step slows the channel down.",
+                "screen_demo": f"Look at the screen. This is where we turn the claim into proof and show the exact step that matters.",
+                "ai_broll": f"Think of this as the visual reset: a fast AI-generated insert that keeps the pace high while the idea lands.",
+                "cta": f"That is the key takeaway. Comment with the niche or tool you want us to break down next.",
+            }
+            return openings.get(visual_type, f"Scene {index}. {title}. The goal is to {goal}.")
+        openings = {
+            "big_caption": f"Новая AI-новость по теме: {topic}. Большинство пролистает это мимо, но именно такие обновления меняют производство видео.",
+            "avatar_fullscreen": f"Я цифровой ведущий этого разбора. Сейчас коротко покажу, почему тема {topic} важна прямо сейчас.",
+            "avatar_pip": f"Главная проблема для аудитории {audience}: работа расползается по инструментам, а каждый ручной шаг замедляет канал.",
+            "screen_demo": "Смотрим на экран. Здесь мы превращаем громкий тезис в доказательство и показываем конкретный шаг.",
+            "ai_broll": "Это быстрая AI-вставка для удержания внимания: визуальный сброс, пока ключевая мысль закрепляется.",
+            "cta": "Вот главный вывод. Напишите в комментариях нишу или инструмент, который нужно разобрать следующим.",
+        }
+        return openings.get(
+            visual_type,
+            f"Сцена {index}. {title}. В этой части разбираем тему: {topic}. Задача сцены — {goal}.",
         )
 
     def _screen_text_for(self, project: Project, index: int, title: str) -> str:

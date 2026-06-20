@@ -38,6 +38,8 @@ class RenderService:
             "width": self.settings.render_width,
             "height": self.settings.render_height,
             "fps": self.settings.render_fps,
+            "style": project.style,
+            "montage_profile": self._montage_profile(project),
             "visual_mode": project.visual_mode,
             "brand_theme": project.brand_theme,
             "script_provider": project.script_provider,
@@ -307,11 +309,19 @@ class RenderService:
                 f"- {source.name}: {source.url}" for source in project.sources
             )
 
+        format_note = ""
+        if project.style.value == "ai_news_avatar":
+            format_note = (
+                "\nФормат ролика: AI-ведущий, сцены с аватаром на весь экран, аватаром в углу, "
+                "демонстрацией экрана, AI b-roll и CTA. Чужие YouTube-кадры не используются.\n"
+            )
+
         return (
             f"{project.topic}\n\n"
             "Сгенерировано в AI Video Studio MVP.\n\n"
             "Таймкоды:\n"
             + "\n".join(chapters)
+            + format_note
             + sources_text
             + "\n\n"
             "Примечание: текущая версия использует оригинальные AI-слайды, карточки/скриншоты "
@@ -341,11 +351,25 @@ class RenderService:
             "brand_theme": project.brand_theme,
             "script_provider": project.script_provider,
             "voice_provider": project.voice_provider,
+            "montage_profile": self._montage_profile(project),
+            "scene_roles": [self._storyboard_scene_role(scene) for scene in project.scenes],
             "scenes": [scene.model_dump(mode="json") for scene in project.scenes],
         }
 
     def _make_thumbnail_prompt(self, project: Project) -> str:
         source_names = ", ".join(source.name for source in project.sources[:4]) or "AI slides"
+        if project.style.value == "ai_news_avatar":
+            if project.language == "en":
+                return (
+                    f"Create a high-contrast AI news YouTube thumbnail for: {project.topic}. "
+                    "Use a realistic digital avatar host, 2-3 huge readable words, screen/tool elements, "
+                    f"modern AI creator style, sources: {source_names}. No third-party YouTube frames."
+                )
+            return (
+                f"Создай контрастную YouTube-обложку в стиле AI-новостей для ролика: {project.topic}. "
+                "Цифровой ведущий крупно, 2-3 огромных читаемых слова, элементы экрана/AI-инструментов, "
+                f"визуальные источники: {source_names}. Не использовать кадры из чужих YouTube-видео."
+            )
         if project.language == "en":
             return (
                 f"Create a high-contrast YouTube thumbnail for a video titled: {project.topic}. "
@@ -397,6 +421,7 @@ class RenderService:
         missing_audio = [scene.id for scene in project.scenes if not scene.audio_path or not Path(scene.audio_path).exists()]
         fallback_sources = [source.id for source in project.sources if source.status == "fallback_card"]
         captured_sources = [source.id for source in project.sources if source.status == "captured"]
+        visual_types = {scene.visual_type for scene in project.scenes}
         return {
             "project_id": project.id,
             "status": project.status,
@@ -416,7 +441,13 @@ class RenderService:
                 "uses_no_third_party_youtube_frames": True,
                 "has_source_export": bool(project.result.sources_path),
                 "has_subtitles": bool(project.result.subtitles_path),
+                "ai_news_avatar_structure": (
+                    {"avatar_fullscreen", "avatar_pip", "screen_demo", "ai_broll", "big_caption", "cta"} <= visual_types
+                    if project.style.value == "ai_news_avatar"
+                    else None
+                ),
             },
+            "montage_profile": self._montage_profile(project),
             "missing_visual_scene_ids": missing_visuals,
             "missing_audio_scene_ids": missing_audio,
             "captured_source_ids": captured_sources,
@@ -429,6 +460,53 @@ class RenderService:
                 "Проверить, что пользователь имеет права на загруженный голос и аватар.",
             ],
         }
+
+    def _montage_profile(self, project: Project) -> str:
+        if project.style.value == "ai_news_avatar":
+            return "ai_news_avatar_fast_retention"
+        return "standard_slideshow"
+
+    def _storyboard_scene_role(self, scene) -> dict[str, object]:
+        return {
+            "scene_id": scene.id,
+            "order": scene.order,
+            "visual_type": scene.visual_type,
+            "avatar_mode": self._avatar_mode_for_scene(scene),
+            "asset_role": self._asset_role_for_scene(scene),
+            "editing_instruction": self._editing_instruction_for_scene(scene),
+        }
+
+    def _avatar_mode_for_scene(self, scene) -> str:
+        if scene.visual_type == "avatar_fullscreen":
+            return "fullscreen"
+        if scene.visual_type in {"avatar_pip", "screen_demo", "cta"} and scene.avatar_visible:
+            return "picture_in_picture"
+        return "none"
+
+    def _asset_role_for_scene(self, scene) -> str:
+        roles = {
+            "avatar_fullscreen": "avatar_host",
+            "avatar_pip": "talking_head_overlay",
+            "screen_demo": "screen_recording_or_source_insert",
+            "ai_broll": "generated_broll",
+            "big_caption": "retention_caption",
+            "cta": "call_to_action",
+            "screenshot": "source_screenshot",
+            "table": "comparison_table",
+            "diagram": "process_diagram",
+        }
+        return roles.get(scene.visual_type, "original_slide")
+
+    def _editing_instruction_for_scene(self, scene) -> str:
+        instructions = {
+            "avatar_fullscreen": "Поставить AI-аватара крупно на весь экран, оставить нижнюю зону под субтитр.",
+            "avatar_pip": "Показать основной экран/карточку, аватара держать в углу поверх контента.",
+            "screen_demo": "Использовать скриншот, запись экрана или карточку сайта, добавить курсор/акцент.",
+            "ai_broll": "Заменить placeholder на короткий AI b-roll или генеративную перебивку.",
+            "big_caption": "Вывести 2-5 крупных слов как retention hook или punchline.",
+            "cta": "Закрыть ролик понятным действием: комментарий, подписка, следующий выпуск.",
+        }
+        return instructions.get(scene.visual_type, scene.notes or "Стандартный монтажный кадр.")
 
     def _make_tags(self, project: Project) -> list[str]:
         words = [word.strip(".,:;!?()[]{}\"'").lower() for word in project.topic.split()]

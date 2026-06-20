@@ -43,7 +43,7 @@ async function assertOk(response: Response, label: string) {
     } catch {
       detail = '';
     }
-    throw new Error(`${label} failed: ${response.status}${detail}`);
+    throw new Error(`${label}: ошибка ${response.status}${detail}`);
   }
 }
 
@@ -71,7 +71,7 @@ export async function registerUser(email: string, password: string): Promise<Aut
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email, password }),
   });
-  await assertOk(response, 'Register');
+  await assertOk(response, 'Регистрация');
   const payload = await response.json();
   setAccessToken(payload.access_token);
   return payload;
@@ -83,7 +83,7 @@ export async function loginUser(email: string, password: string): Promise<AuthTo
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email, password }),
   });
-  await assertOk(response, 'Login');
+  await assertOk(response, 'Вход');
   const payload = await response.json();
   setAccessToken(payload.access_token);
   return payload;
@@ -91,7 +91,7 @@ export async function loginUser(email: string, password: string): Promise<AuthTo
 
 export async function getCurrentUser(): Promise<UserPublic> {
   const response = await fetch(`${API_BASE_URL}/auth/me`, { headers: headers() });
-  await assertOk(response, 'Get current user');
+  await assertOk(response, 'Получение текущего пользователя');
   return response.json();
 }
 
@@ -100,7 +100,7 @@ export async function logoutUser(): Promise<{ revoked: boolean }> {
     method: 'POST',
     headers: headers(),
   });
-  await assertOk(response, 'Logout');
+  await assertOk(response, 'Выход');
   return response.json();
 }
 
@@ -115,32 +115,33 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
       topic: options.topic,
       organization_id: options.organizationId,
       duration_minutes: 3,
-      style: 'expert_review',
+      style: 'ai_news_avatar',
       language: 'ru',
       audience: 'создатели YouTube-каналов',
       visual_mode: options.useOfficialSources ? 'official_sites_plus_ai' : 'ai_slides_only',
-      source_urls: options.useOfficialSources ? ['https://www.heygen.com/', 'https://runwayml.com/'] : [],
+      source_urls: options.useOfficialSources ? ['https://www.heygen.com/', 'https://runwayml.com/', 'https://www.synthesia.io/'] : [],
       script_provider: options.useLlmScript ? 'openai' : 'template',
       voice_provider: options.useTtsVoice ? 'openai' : 'placeholder',
       voice_id: 'alloy',
       brand_theme: 'neon',
-      avatar_enabled: false,
+      avatar_enabled: true,
+      avatar_position: 'bottom_left',
       burn_subtitles: options.burnSubtitles,
     }),
   });
-  await assertOk(response, 'Create project');
+  await assertOk(response, 'Создание проекта');
   return response.json();
 }
 
 export async function listProjects(): Promise<Project[]> {
   const response = await fetch(`${API_BASE_URL}/projects?limit=50&offset=0`, { headers: headers() });
-  await assertOk(response, 'List projects');
+  await assertOk(response, 'Список проектов');
   return response.json();
 }
 
 export async function listOrganizations(): Promise<Organization[]> {
   const response = await fetch(`${API_BASE_URL}/organizations`, { headers: headers() });
-  await assertOk(response, 'List organizations');
+  await assertOk(response, 'Список организаций');
   return response.json();
 }
 
@@ -150,13 +151,13 @@ export async function createOrganization(name: string): Promise<Organization> {
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name }),
   });
-  await assertOk(response, 'Create organization');
+  await assertOk(response, 'Создание организации');
   return response.json();
 }
 
 export async function listOrganizationMembers(organizationId: string): Promise<OrganizationMember[]> {
   const response = await fetch(`${API_BASE_URL}/organizations/${organizationId}/members`, { headers: headers() });
-  await assertOk(response, 'List organization members');
+  await assertOk(response, 'Участники организации');
   return response.json();
 }
 
@@ -169,7 +170,7 @@ export async function addOrganizationMember(
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(target),
   });
-  await assertOk(response, 'Add organization member');
+  await assertOk(response, 'Добавление участника');
   return response.json();
 }
 
@@ -183,7 +184,7 @@ export async function updateOrganizationMember(
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ role }),
   });
-  await assertOk(response, 'Update organization member');
+  await assertOk(response, 'Обновление участника');
   return response.json();
 }
 
@@ -192,7 +193,7 @@ export async function removeOrganizationMember(organizationId: string, userId: s
     method: 'DELETE',
     headers: headers(),
   });
-  await assertOk(response, 'Remove organization member');
+  await assertOk(response, 'Удаление участника');
 }
 
 export async function generateAll(projectId: string): Promise<Project> {
@@ -200,7 +201,7 @@ export async function generateAll(projectId: string): Promise<Project> {
     method: 'POST',
     headers: headers(),
   });
-  await assertOk(response, 'Generation');
+  await assertOk(response, 'Генерация');
   return response.json();
 }
 
@@ -209,19 +210,19 @@ export async function startProjectJob(projectId: string, jobType: JobType = 'gen
     method: 'POST',
     headers: headers({ 'Idempotency-Key': idempotencyKey(`job-start-${jobType}`) }),
   });
-  await assertOk(response, 'Start job');
+  await assertOk(response, 'Запуск задачи');
   return response.json();
 }
 
 export async function getJob(jobId: string): Promise<ProjectJob> {
   const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, { headers: headers() });
-  await assertOk(response, 'Get job');
+  await assertOk(response, 'Получение задачи');
   return response.json();
 }
 
 export async function getJobEvents(jobId: string): Promise<JobEvent[]> {
   const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/events?limit=100&offset=0`, { headers: headers() });
-  await assertOk(response, 'Get job events');
+  await assertOk(response, 'События задачи');
   return response.json();
 }
 
@@ -230,7 +231,7 @@ export async function cancelJob(jobId: string): Promise<ProjectJob> {
     method: 'POST',
     headers: headers(),
   });
-  await assertOk(response, 'Cancel job');
+  await assertOk(response, 'Отмена задачи');
   return response.json();
 }
 
@@ -239,38 +240,38 @@ export async function retryJob(jobId: string): Promise<ProjectJob> {
     method: 'POST',
     headers: headers(),
   });
-  await assertOk(response, 'Retry job');
+  await assertOk(response, 'Повтор задачи');
   return response.json();
 }
 
 export async function getProject(projectId: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}`, { headers: headers() });
-  await assertOk(response, 'Get project');
+  await assertOk(response, 'Получение проекта');
   return response.json();
 }
 
 export async function getProjectManifest(projectId: string): Promise<ProjectManifest> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/manifest`, { headers: headers() });
-  await assertOk(response, 'Get project manifest');
+  await assertOk(response, 'Манифест проекта');
   return response.json();
 }
 
 export async function getAuditEvents(): Promise<AuditEvent[]> {
   const response = await fetch(`${API_BASE_URL}/audit/events?limit=100&offset=0`, { headers: headers() });
-  await assertOk(response, 'Get audit events');
+  await assertOk(response, 'События аудита');
   return response.json();
 }
 
 export async function getUsageMe(): Promise<UsageOverview> {
   const response = await fetch(`${API_BASE_URL}/usage/me`, { headers: headers() });
-  await assertOk(response, 'Get usage');
+  await assertOk(response, 'Лимиты использования');
   return response.json();
 }
 
 export async function listConsents(projectId?: string): Promise<ConsentRecord[]> {
   const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
   const response = await fetch(`${API_BASE_URL}/consents${query}`, { headers: headers() });
-  await assertOk(response, 'List consents');
+  await assertOk(response, 'Список согласий');
   return response.json();
 }
 
@@ -290,7 +291,7 @@ export async function recordConsent(options: {
       ...options,
     }),
   });
-  await assertOk(response, 'Record consent');
+  await assertOk(response, 'Запись согласия');
   return response.json();
 }
 
@@ -300,7 +301,7 @@ export async function patchScene(projectId: string, sceneId: string, payload: Sc
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
-  await assertOk(response, 'Patch scene');
+  await assertOk(response, 'Обновление сцены');
   return response.json();
 }
 
@@ -310,7 +311,7 @@ export async function insertScene(projectId: string, payload: SceneCreate): Prom
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ visual_type: 'ai_slide', ...payload }),
   });
-  await assertOk(response, 'Insert scene');
+  await assertOk(response, 'Добавление сцены');
   return response.json();
 }
 
@@ -319,7 +320,7 @@ export async function deleteScene(projectId: string, sceneId: string): Promise<P
     method: 'DELETE',
     headers: headers(),
   });
-  await assertOk(response, 'Delete scene');
+  await assertOk(response, 'Удаление сцены');
   return response.json();
 }
 
@@ -328,7 +329,7 @@ export async function regenerateSceneSlide(projectId: string, sceneId: string): 
     method: 'POST',
     headers: headers(),
   });
-  await assertOk(response, 'Regenerate scene slide');
+  await assertOk(response, 'Пересборка кадра');
   return response.json();
 }
 
@@ -338,7 +339,7 @@ export async function reorderScenes(projectId: string, sceneIds: string[]): Prom
     headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ scene_ids: sceneIds }),
   });
-  await assertOk(response, 'Reorder scenes');
+  await assertOk(response, 'Порядок сцен');
   return response.json();
 }
 
@@ -347,13 +348,13 @@ export async function duplicateProject(projectId: string): Promise<Project> {
     method: 'POST',
     headers: headers({ 'Idempotency-Key': idempotencyKey('project-duplicate') }),
   });
-  await assertOk(response, 'Duplicate project');
+  await assertOk(response, 'Копирование проекта');
   return response.json();
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}`, { method: 'DELETE', headers: headers() });
-  await assertOk(response, 'Delete project');
+  await assertOk(response, 'Удаление проекта');
 }
 
 export function delay(ms: number) {

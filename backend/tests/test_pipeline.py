@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import ConfigurationError, Settings, get_settings
-from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, SourceKind, UserCreate, UserSession, VisualMode, VoiceProviderName
+from app.models import JobStatus, JobType, ProjectCreate, ProjectStatus, SceneCreate, ScenePatch, SceneReorder, ScriptProviderName, SourceKind, UserCreate, UserSession, VideoStyle, VisualMode, VoiceProviderName
 from app.pipeline import VideoPipeline
 from app.services.avatar_service import AvatarService
 from app.services.auth_service import AuthService, SessionNotFoundError
@@ -182,6 +182,53 @@ def test_visual_service_writes_render_template_manifest(tmp_path):
     assert "source_review_v1" in template_ids
     assert len(template_ids) >= 2
     assert all(item["layout"] for item in manifest)
+
+
+def test_ai_news_avatar_style_generates_avatar_screen_and_broll_storyboard(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="AI-аватар для YouTube-роликов",
+            duration_minutes=2,
+            style=VideoStyle.ai_news_avatar,
+            visual_mode=VisualMode.official_sites_plus_ai,
+            source_urls=["https://www.heygen.com/", "https://runwayml.com/"],
+            avatar_enabled=True,
+            avatar_position="bottom_left",
+            burn_subtitles=True,
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+    result = pipeline.generate_script(project.id)
+    visual_types = {scene.visual_type for scene in result.scenes}
+
+    assert result.scenes[0].visual_type == "big_caption"
+    assert result.scenes[-1].visual_type == "cta"
+    assert {"avatar_fullscreen", "avatar_pip", "screen_demo", "ai_broll", "big_caption", "cta"} <= visual_types
+    assert any(scene.avatar_visible and scene.visual_type == "avatar_pip" for scene in result.scenes)
+
+    result = pipeline.collect_sources(result.id)
+    assert any(scene.visual_type == "screen_demo" and scene.source_id for scene in result.scenes)
+
+    result = pipeline.generate_slides(result.id)
+    manifest_path = store.project_dir(result.id) / "slides" / "render_templates.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    template_ids = {item["template_id"] for item in manifest}
+    avatar_modes = {item["avatar_mode"] for item in manifest}
+    asset_roles = {item["asset_role"] for item in manifest}
+
+    assert {
+        "avatar_fullscreen_v1",
+        "avatar_pip_v1",
+        "screen_demo_v1",
+        "ai_broll_v1",
+        "big_caption_v1",
+        "cta_v1",
+    } <= template_ids
+    assert {"fullscreen", "picture_in_picture"} <= avatar_modes
+    assert {"avatar_host", "screen_recording_or_source_insert", "generated_broll", "call_to_action"} <= asset_roles
+    assert all(Path(scene.visual_path).exists() for scene in result.scenes)
 
 
 def test_source_service_uses_search_provider_results(tmp_path):

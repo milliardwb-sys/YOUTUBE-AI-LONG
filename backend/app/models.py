@@ -30,6 +30,7 @@ class VideoStyle(str, Enum):
     top_list = "top_list"
     trend_analysis = "trend_analysis"
     sales_video = "sales_video"
+    ai_news_avatar = "ai_news_avatar"
 
 
 class VisualMode(str, Enum):
@@ -60,6 +61,20 @@ class BrandTheme(str, Enum):
     dark = "dark"
     light = "light"
     neon = "neon"
+
+
+SceneVisualType = Literal[
+    "ai_slide",
+    "screenshot",
+    "table",
+    "diagram",
+    "avatar_fullscreen",
+    "avatar_pip",
+    "screen_demo",
+    "ai_broll",
+    "big_caption",
+    "cta",
+]
 
 
 class JobStatus(str, Enum):
@@ -547,7 +562,7 @@ class ScenePatch(BaseModel):
     goal: str | None = Field(default=None, max_length=260)
     narration: str | None = Field(default=None, max_length=2600)
     on_screen_text: str | None = Field(default=None, max_length=220)
-    visual_type: Literal["ai_slide", "screenshot", "table", "diagram"] | None = None
+    visual_type: SceneVisualType | None = None
     duration_sec: int | None = Field(default=None, ge=5, le=240)
     avatar_visible: bool | None = None
     source_id: str | None = None
@@ -560,7 +575,7 @@ class SceneCreate(BaseModel):
     goal: str = Field(default="добавить поясняющую сцену", max_length=260)
     narration: str = Field(default="Новая сцена. Добавьте текст озвучки перед финальным рендером.", max_length=2600)
     on_screen_text: str | None = Field(default=None, max_length=220)
-    visual_type: Literal["ai_slide", "screenshot", "table", "diagram"] = "ai_slide"
+    visual_type: SceneVisualType = "ai_slide"
     duration_sec: int = Field(default=12, ge=5, le=240)
     avatar_visible: bool = True
     source_id: str | None = None
@@ -594,7 +609,7 @@ class Scene(BaseModel):
     goal: str
     narration: str
     on_screen_text: str
-    visual_type: Literal["ai_slide", "screenshot", "table", "diagram"] = "ai_slide"
+    visual_type: SceneVisualType = "ai_slide"
     visual_prompt: str | None = None
     notes: str | None = None
     duration_sec: int

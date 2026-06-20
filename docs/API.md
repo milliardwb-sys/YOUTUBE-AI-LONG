@@ -361,24 +361,35 @@ The manifest includes project status, scene/source counts, scenes with visuals a
 
 ```json
 {
-  "topic": "5 AI-сервисов для создания видео в 2026 году",
+  "topic": "AI-аватар показывает 5 сервисов для создания YouTube-видео в 2026 году",
   "duration_minutes": 3,
-  "style": "expert_review",
+  "style": "ai_news_avatar",
   "language": "ru",
   "audience": "создатели YouTube-каналов",
   "visual_mode": "official_sites_plus_ai",
-  "source_urls": ["https://www.heygen.com/", "https://runwayml.com/"],
-  "avatar_enabled": false,
-  "avatar_position": "bottom_right",
+  "source_urls": ["https://www.heygen.com/", "https://runwayml.com/", "https://www.synthesia.io/"],
+  "avatar_enabled": true,
+  "avatar_position": "bottom_left",
   "script_provider": "template",
   "voice_provider": "placeholder",
   "voice_id": "alloy",
   "brand_theme": "neon",
-  "burn_subtitles": false
+  "burn_subtitles": true
 }
 ```
 
 ### Основные enum-поля
+
+`style`:
+
+```text
+expert_review   — экспертный обзор;
+tutorial        — обучающий ролик;
+top_list        — топ-подборка;
+trend_analysis  — анализ тренда;
+sales_video     — продающее видео;
+ai_news_avatar  — AI-ведущий: fullscreen avatar, PIP, screen demo, AI b-roll, CTA.
+```
 
 `visual_mode`:
 
@@ -670,6 +681,8 @@ render
 
 ## Scene editor endpoints
 
+Поддерживаемые `visual_type`: `ai_slide`, `screenshot`, `table`, `diagram`, `avatar_fullscreen`, `avatar_pip`, `screen_demo`, `ai_broll`, `big_caption`, `cta`.
+
 ### PATCH /projects/{id}/scenes/{scene_id}
 
 Редактирует сцену.
@@ -680,7 +693,7 @@ render
   "goal": "зацепить зрителя",
   "narration": "Обновлённый текст диктора...",
   "on_screen_text": "AI-видео: что выбрать",
-  "visual_type": "ai_slide",
+  "visual_type": "screen_demo",
   "duration_sec": 20,
   "avatar_visible": true,
   "visual_prompt": "neon SaaS explainer slide with huge readable title"

@@ -102,7 +102,17 @@ export type Scene = {
   goal?: string;
   narration?: string;
   on_screen_text?: string;
-  visual_type: 'ai_slide' | 'screenshot' | 'table' | 'diagram';
+  visual_type:
+    | 'ai_slide'
+    | 'screenshot'
+    | 'table'
+    | 'diagram'
+    | 'avatar_fullscreen'
+    | 'avatar_pip'
+    | 'screen_demo'
+    | 'ai_broll'
+    | 'big_caption'
+    | 'cta';
   start_sec: number;
   duration_sec: number;
   source_name?: string | null;
