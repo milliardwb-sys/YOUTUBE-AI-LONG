@@ -41,6 +41,18 @@ class Settings:
     openai_tts_model: str
     openai_tts_voice: str
     max_openai_tts_chars: int
+    enable_model_images: bool
+    openai_image_model: str
+    openai_image_size: str
+    heygen_api_key: str | None
+    heygen_api_base_url: str
+    heygen_avatar_id: str | None
+    heygen_voice_id: str | None
+    heygen_resolution: str
+    heygen_output_format: str
+    heygen_remove_background: bool
+    heygen_enable_motion_prompt: bool
+    heygen_poll_seconds: int
     burn_subtitles_by_default: bool
     run_jobs_inline: bool
     execute_jobs_in_api: bool
@@ -172,6 +184,18 @@ def get_settings() -> Settings:
         openai_tts_model=os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
         openai_tts_voice=os.getenv("OPENAI_TTS_VOICE", "alloy"),
         max_openai_tts_chars=_env_int("MAX_OPENAI_TTS_CHARS", 3800),
+        enable_model_images=_env_bool("ENABLE_MODEL_IMAGES", False),
+        openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1").strip(),
+        openai_image_size=os.getenv("OPENAI_IMAGE_SIZE", "1536x1024").strip(),
+        heygen_api_key=_env_optional("HEYGEN_API_KEY"),
+        heygen_api_base_url=os.getenv("HEYGEN_API_BASE_URL", "https://api.heygen.com").strip().rstrip("/"),
+        heygen_avatar_id=_env_optional("HEYGEN_AVATAR_ID"),
+        heygen_voice_id=_env_optional("HEYGEN_VOICE_ID"),
+        heygen_resolution=os.getenv("HEYGEN_RESOLUTION", "1080p").strip(),
+        heygen_output_format=os.getenv("HEYGEN_OUTPUT_FORMAT", "mp4").strip().lower(),
+        heygen_remove_background=_env_bool("HEYGEN_REMOVE_BACKGROUND", True),
+        heygen_enable_motion_prompt=_env_bool("HEYGEN_ENABLE_MOTION_PROMPT", False),
+        heygen_poll_seconds=max(0, _env_int("HEYGEN_POLL_SECONDS", 0)),
         burn_subtitles_by_default=_env_bool("BURN_SUBTITLES_BY_DEFAULT", False),
         run_jobs_inline=_env_bool("RUN_JOBS_INLINE", False),
         execute_jobs_in_api=_env_bool("EXECUTE_JOBS_IN_API", True),
@@ -266,6 +290,14 @@ def validate_settings(settings: Settings) -> None:
             raise ConfigurationError("OIDC_JWKS_URL is required when OIDC_ENABLED=true")
         if not settings.oidc_algorithms:
             raise ConfigurationError("OIDC_ALGORITHMS must contain at least one algorithm when OIDC_ENABLED=true")
+    if settings.heygen_api_key and not settings.heygen_avatar_id:
+        raise ConfigurationError("HEYGEN_AVATAR_ID is required when HEYGEN_API_KEY is configured")
+    if settings.heygen_resolution not in {"720p", "1080p", "4k"}:
+        raise ConfigurationError("HEYGEN_RESOLUTION must be one of 720p, 1080p, 4k")
+    if settings.heygen_output_format not in {"mp4", "webm"}:
+        raise ConfigurationError("HEYGEN_OUTPUT_FORMAT must be either mp4 or webm")
+    if settings.enable_model_images and not settings.openai_api_key:
+        raise ConfigurationError("OPENAI_API_KEY is required when ENABLE_MODEL_IMAGES=true")
     if settings.audit_storage_backend not in {"local", "postgres"}:
         raise ConfigurationError("AUDIT_STORAGE_BACKEND must be either 'local' or 'postgres'")
     if settings.audit_storage_backend == "postgres" and not settings.database_url:

@@ -264,9 +264,9 @@ Billing + limits
 ScriptService      → LLMProvider + JSON repair + fact-check layer
 SourceService      → SearchProvider + WebsiteResolver + license checker
 ScreenshotService  → Playwright cluster / browserless worker
-VisualService      → Remotion templates + image generation
+VisualService      → Pillow/Remotion templates + OpenAI image generation + visual assets manifest
 VoiceService       → TTSProvider + VoiceProfile + consent flow
-AvatarService      → HeyGen/D-ID/Tavus adapter
+AvatarService      → HeyGen adapter + avatar manifest + future D-ID/Tavus adapters
 RenderService      → Remotion/FFmpeg queue worker
 Storage            → S3/R2 + signed URLs
 ProjectStore       → PostgreSQL models

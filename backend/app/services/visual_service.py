@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -39,6 +41,7 @@ class VisualService:
         slides_dir = ensure_dir(project_dir / "slides")
         source_by_id = {source.id: source for source in project.sources}
         manifest: list[dict[str, object]] = []
+        visual_assets: list[dict[str, object]] = []
         for scene in project.scenes:
             slide_path = slides_dir / f"scene_{scene.order:03d}.png"
             source = source_by_id.get(scene.source_id or "")
@@ -66,7 +69,11 @@ class VisualService:
             self._verify_slide(slide_path)
             scene.visual_path = str(slide_path)
             manifest.append(self._template_manifest(scene, template, slide_path))
+            visual_assets.append(self._visual_asset_manifest(scene, source))
         write_json(slides_dir / "render_templates.json", manifest)
+        visual_assets_path = project_dir / "assets" / "visual_assets_manifest.json"
+        write_json(visual_assets_path, visual_assets)
+        project.result.visual_assets_manifest_path = str(visual_assets_path)
         project.status = ProjectStatus.visuals_ready
         project.error = None
         project.touch("visuals_ready")
@@ -104,6 +111,7 @@ class VisualService:
         self._verify_slide(slide_path)
         scene.visual_path = str(slide_path)
         write_json(slides_dir / f"scene_{scene.order:03d}.template.json", self._template_manifest(scene, template, slide_path))
+        write_json(slides_dir / f"scene_{scene.order:03d}.visual_asset.json", self._visual_asset_manifest(scene, source))
         project.touch("scene_slide_regenerated")
         return project
 
@@ -266,6 +274,16 @@ class VisualService:
     def _render_ai_broll_slide(self, project: Project, scene: Scene, path: Path, template: SlideTemplate) -> None:
         image, draw = self._base_image(scene.order, template)
         self._draw_header(draw, project, scene, template)
+        generated_image_path = self._try_generate_model_image(project, scene, path.parents[1])
+        if generated_image_path:
+            try:
+                generated = Image.open(generated_image_path).convert("RGB")
+                self._paste_cover(image, generated, [90, 155, self.width - 90, self.height - 130])
+                draw.rounded_rectangle([90, 155, self.width - 90, self.height - 130], radius=40, outline=template.palette["accent"], width=5)
+            except Exception as exc:  # noqa: BLE001
+                warning = f"Generated image could not be used for scene {scene.order}; template b-roll used: {exc}"
+                if warning not in project.result.warnings:
+                    project.result.warnings.append(warning)
         center_x = self.width // 2
         center_y = self.height // 2 + 10
         accent = template.palette["accent"]
@@ -417,6 +435,63 @@ class VisualService:
         paste_x = box[0] + (target_w - source.width) // 2
         paste_y = box[1] + (target_h - source.height) // 2
         image.paste(source, (paste_x, paste_y))
+
+    def _paste_cover(self, image: Image.Image, source: Image.Image, box: list[int]) -> None:
+        target_w = box[2] - box[0]
+        target_h = box[3] - box[1]
+        scale = max(target_w / source.width, target_h / source.height)
+        resized = source.resize((int(source.width * scale), int(source.height * scale)), Image.Resampling.LANCZOS)
+        left = max(0, (resized.width - target_w) // 2)
+        top = max(0, (resized.height - target_h) // 2)
+        cropped = resized.crop((left, top, left + target_w, top + target_h))
+        image.paste(cropped, (box[0], box[1]))
+
+    def _try_generate_model_image(self, project: Project, scene: Scene, project_dir: Path) -> Path | None:
+        if not self.settings.enable_model_images:
+            return None
+        output_dir = ensure_dir(project_dir / "assets" / "generated_images")
+        output_path = output_dir / f"scene_{scene.order:03d}_model.png"
+        if output_path.exists():
+            scene.generated_image_path = str(output_path)
+            return output_path
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            warning = f"OpenAI image generation unavailable; install optional dependency: {exc}"
+            if warning not in project.result.warnings:
+                project.result.warnings.append(warning)
+            return None
+        try:
+            client = OpenAI(api_key=self.settings.openai_api_key)
+            prompt = (
+                f"{scene.visual_prompt or scene.goal}. "
+                f"Original cinematic AI b-roll frame for a Russian YouTube video about {project.topic}. "
+                "No logos, no third-party YouTube screenshots, no copyrighted characters. "
+                "High contrast, clean tech style, 16:9 composition, space for captions."
+            )
+            response = client.images.generate(
+                model=self.settings.openai_image_model,
+                prompt=prompt,
+                size=self.settings.openai_image_size,
+            )
+            first = response.data[0]
+            b64_value = getattr(first, "b64_json", None)
+            if b64_value:
+                output_path.write_bytes(base64.b64decode(b64_value))
+            else:
+                url_value = getattr(first, "url", None)
+                if not url_value:
+                    raise RuntimeError("OpenAI image response did not include b64_json or url")
+                request = Request(url_value, headers={"User-Agent": "AI Video Studio"})
+                with urlopen(request, timeout=60) as response_stream:  # noqa: S310 - URL is provider-returned asset
+                    output_path.write_bytes(response_stream.read())
+            scene.generated_image_path = str(output_path)
+            return output_path
+        except Exception as exc:  # noqa: BLE001
+            warning = f"Model image generation failed for scene {scene.order}; template b-roll used: {exc}"
+            if warning not in project.result.warnings:
+                project.result.warnings.append(warning)
+            return None
 
     def _text_width(self, draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
         bbox = draw.textbbox((0, 0), text, font=font)
@@ -700,6 +775,31 @@ class VisualService:
             "avatar_mode": self._avatar_mode_for_scene(scene),
             "asset_role": self._asset_role_for_scene(scene),
             "montage_note": self._montage_note_for_scene(scene),
+        }
+
+    def _visual_asset_manifest(self, scene: Scene, source: SourceCandidate | None) -> dict[str, object]:
+        if scene.generated_image_path:
+            strategy = "model_generated_image"
+        elif scene.visual_type in {"screenshot", "screen_demo"} and source and source.screenshot_path:
+            strategy = "platform_screenshot_or_fallback_card"
+        else:
+            strategy = "offline_render_template"
+        return {
+            "scene_id": scene.id,
+            "scene_order": scene.order,
+            "visual_type": scene.visual_type,
+            "strategy": strategy,
+            "source_id": scene.source_id,
+            "source_name": scene.source_name,
+            "source_url": scene.source_url,
+            "source_screenshot_path": source.screenshot_path if source else None,
+            "generated_image_path": scene.generated_image_path,
+            "visual_path": scene.visual_path,
+            "visual_prompt": scene.visual_prompt,
+            "rights_note": (
+                "Use user-provided/official platform screenshots or original model-generated images. "
+                "Do not use third-party YouTube frames without rights."
+            ),
         }
 
     def _avatar_mode_for_scene(self, scene: Scene) -> str:

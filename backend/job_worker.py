@@ -26,7 +26,7 @@ def build_runner() -> JobRunner:
         sources=SourceService(settings),
         visuals=VisualService(settings),
         voice=VoiceService(settings),
-        avatar=AvatarService(),
+        avatar=AvatarService(settings),
         render=RenderService(settings),
     )
     return JobRunner(settings, pipeline, JobStore(settings))

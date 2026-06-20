@@ -248,6 +248,8 @@ class RenderService:
             project.result.youtube_metadata_path,
             project.result.quality_report_path,
             project.result.voice_manifest_path,
+            project.result.avatar_manifest_path,
+            project.result.visual_assets_manifest_path,
             project.result.render_manifest_path,
         ]
         with ZipFile(package_path, "w", compression=ZIP_DEFLATED) as archive:
@@ -259,6 +261,14 @@ class RenderService:
                 file_path = self._safe_existing_project_file(project, project_dir, scene.visual_path, f"Scene {scene.order} visual")
                 if file_path:
                     archive.write(file_path, arcname=f"slides/{file_path.name}")
+            for scene in project.scenes:
+                file_path = self._safe_existing_project_file(project, project_dir, scene.generated_image_path, f"Scene {scene.order} generated image")
+                if file_path:
+                    archive.write(file_path, arcname=f"generated_images/{file_path.name}")
+            for scene in project.scenes:
+                file_path = self._safe_existing_project_file(project, project_dir, scene.avatar_video_path, f"Scene {scene.order} avatar video")
+                if file_path:
+                    archive.write(file_path, arcname=f"avatar/{file_path.name}")
             for scene in project.scenes:
                 file_path = self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio")
                 if file_path:
@@ -419,6 +429,9 @@ class RenderService:
     def _make_quality_report(self, project: Project) -> dict:
         missing_visuals = [scene.id for scene in project.scenes if not scene.visual_path or not Path(scene.visual_path).exists()]
         missing_audio = [scene.id for scene in project.scenes if not scene.audio_path or not Path(scene.audio_path).exists()]
+        avatar_scene_ids = [scene.id for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
+        avatar_ready_ids = [scene.id for scene in project.scenes if scene.avatar_video_id or scene.avatar_video_path]
+        generated_image_ids = [scene.id for scene in project.scenes if scene.generated_image_path]
         fallback_sources = [source.id for source in project.sources if source.status == "fallback_card"]
         captured_sources = [source.id for source in project.sources if source.status == "captured"]
         visual_types = {scene.visual_type for scene in project.scenes}
@@ -441,6 +454,8 @@ class RenderService:
                 "uses_no_third_party_youtube_frames": True,
                 "has_source_export": bool(project.result.sources_path),
                 "has_subtitles": bool(project.result.subtitles_path),
+                "has_avatar_manifest": bool(project.result.avatar_manifest_path),
+                "has_visual_assets_manifest": bool(project.result.visual_assets_manifest_path),
                 "ai_news_avatar_structure": (
                     {"avatar_fullscreen", "avatar_pip", "screen_demo", "ai_broll", "big_caption", "cta"} <= visual_types
                     if project.style.value == "ai_news_avatar"
@@ -450,6 +465,9 @@ class RenderService:
             "montage_profile": self._montage_profile(project),
             "missing_visual_scene_ids": missing_visuals,
             "missing_audio_scene_ids": missing_audio,
+            "avatar_scene_ids": avatar_scene_ids,
+            "avatar_ready_scene_ids": avatar_ready_ids,
+            "generated_image_scene_ids": generated_image_ids,
             "captured_source_ids": captured_sources,
             "fallback_source_ids": fallback_sources,
             "warnings": project.result.warnings,

@@ -118,6 +118,11 @@ export type Scene = {
   source_name?: string | null;
   visual_url?: string | null;
   audio_url?: string | null;
+  generated_image_url?: string | null;
+  avatar_video_id?: string | null;
+  avatar_video_status?: string | null;
+  avatar_video_url?: string | null;
+  avatar_video_file_url?: string | null;
 };
 
 export type ScenePatch = {
@@ -162,6 +167,8 @@ export type Project = {
     title_options_url?: string | null;
     youtube_metadata_url?: string | null;
     voice_manifest_url?: string | null;
+    avatar_manifest_url?: string | null;
+    visual_assets_manifest_url?: string | null;
     render_manifest_url?: string | null;
     export_package_url?: string | null;
     warnings?: string[];

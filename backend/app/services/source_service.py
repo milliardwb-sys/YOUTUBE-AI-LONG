@@ -119,6 +119,8 @@ class SourceService:
                     ("Canva", "https://www.canva.com/", "Дизайн, презентации и видео-шаблоны для авторов."),
                     ("Pika", "https://pika.art/", "Генерация коротких AI-видео и визуальных сцен."),
                     ("CapCut", "https://www.capcut.com/", "Популярный редактор видео и шаблоны для creator workflow."),
+                    ("ElevenLabs", "https://elevenlabs.io/", "AI-голоса, дубляж и voiceover для видео."),
+                    ("Descript", "https://www.descript.com/", "Монтаж видео и аудио через текстовый workflow."),
                 ]
             )
 
@@ -144,6 +146,18 @@ class SourceService:
                 [
                     ("YouTube Help", "https://support.google.com/youtube/", "Официальная справка YouTube для авторов."),
                     ("YouTube Creators", "https://www.youtube.com/creators/", "Официальный раздел для авторов YouTube."),
+                    ("YouTube Studio", "https://studio.youtube.com/", "Официальная платформа управления каналом и аналитикой."),
+                ]
+            )
+
+        if any(keyword in text for keyword in ["seo", "сео", "поиск", "ключев", "ranking", "ранжирован"]):
+            curated.extend(
+                [
+                    ("Google Search Central", "https://developers.google.com/search", "Официальная документация Google Search для SEO."),
+                    ("Google Trends", "https://trends.google.com/", "Проверка динамики спроса и тем для контента."),
+                    ("Ahrefs", "https://ahrefs.com/", "SEO-инструменты для анализа ключей, конкурентов и ссылок."),
+                    ("Semrush", "https://www.semrush.com/", "SEO/маркетинговая платформа для keyword research и аудита."),
+                    ("Surfer SEO", "https://surferseo.com/", "Контент-оптимизация и SEO workflow для авторов."),
                 ]
             )
 

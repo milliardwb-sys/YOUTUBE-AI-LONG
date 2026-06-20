@@ -123,7 +123,7 @@ pipeline = VideoPipeline(
     sources=SourceService(settings),
     visuals=VisualService(settings),
     voice=VoiceService(settings),
-    avatar=AvatarService(),
+    avatar=AvatarService(settings),
     render=RenderService(settings),
 )
 job_store = JobStore(settings)
@@ -170,6 +170,8 @@ RESULT_ARTIFACT_KEYS = [
     "youtube_metadata_path",
     "quality_report_path",
     "voice_manifest_path",
+    "avatar_manifest_path",
+    "visual_assets_manifest_path",
     "render_manifest_path",
     "export_package_path",
 ]
@@ -799,6 +801,8 @@ def _with_file_urls(project: Project) -> dict:
     for scene in payload.get("scenes", []):
         scene["visual_url"] = _public_file_url(scene.get("visual_path"))
         scene["audio_url"] = _public_file_url(scene.get("audio_path"))
+        scene["generated_image_url"] = _public_file_url(scene.get("generated_image_path"))
+        scene["avatar_video_file_url"] = _public_file_url(scene.get("avatar_video_path"))
     for source in payload.get("sources", []):
         source["screenshot_url"] = _public_file_url(source.get("screenshot_path"))
     return payload
@@ -944,6 +948,8 @@ def health() -> dict[str, str | bool | int]:
         "env": settings.app_env,
         "browser_screenshots": settings.enable_browser_screenshots,
         "openai_configured": bool(settings.openai_api_key),
+        "model_images_enabled": settings.enable_model_images,
+        "heygen_configured": bool(settings.heygen_api_key and settings.heygen_avatar_id),
         "run_jobs_inline": settings.run_jobs_inline,
         "job_workers": settings.job_workers,
         "render_timeout_seconds": settings.render_timeout_seconds,
@@ -1011,6 +1017,11 @@ def diagnostics() -> dict:
             "openai_configured": bool(settings.openai_api_key),
             "script_default": settings.default_script_provider,
             "voice_default": settings.default_voice_provider,
+            "model_images_enabled": settings.enable_model_images,
+            "openai_image_model": settings.openai_image_model,
+            "heygen_configured": bool(settings.heygen_api_key and settings.heygen_avatar_id),
+            "heygen_resolution": settings.heygen_resolution,
+            "heygen_motion_prompt_enabled": settings.heygen_enable_motion_prompt,
         },
         "billing": billing_service.metadata(),
         "audit": audit_log.metadata(),
@@ -1333,6 +1344,19 @@ def providers() -> dict:
         "screenshots": {
             "browser_enabled": settings.enable_browser_screenshots,
             "timeout_ms": settings.browser_timeout_ms,
+        },
+        "visuals": {
+            "model_images_enabled": settings.enable_model_images,
+            "openai_image_model": settings.openai_image_model,
+            "openai_image_size": settings.openai_image_size,
+        },
+        "avatar": {
+            "provider": "heygen",
+            "configured": bool(settings.heygen_api_key and settings.heygen_avatar_id),
+            "resolution": settings.heygen_resolution,
+            "output_format": settings.heygen_output_format,
+            "remove_background": settings.heygen_remove_background,
+            "motion_prompt_enabled": settings.heygen_enable_motion_prompt,
         },
         "search": {
             "provider": settings.search_provider,

@@ -10,7 +10,7 @@
 - сцена с AI-аватаром на весь экран;
 - сцены с аватаром в углу поверх демонстрации экрана;
 - screen demo / source insert для сайтов, отчетов, интерфейсов и fallback-карточек;
-- AI b-roll placeholder для будущей генеративной видеовставки;
+- AI b-roll placeholder или model-generated image для генеративной перебивки;
 - финальный CTA с понятным действием для зрителя.
 
 ## Новые visual_type
@@ -28,13 +28,22 @@
 - Автоматическая привязка источников к `screen_demo`.
 - Рендер PNG-кадров под каждый новый тип сцены.
 - Манифест шаблонов с `avatar_mode`, `asset_role` и монтажной подсказкой.
+- `visual_assets_manifest.json`: по каждой сцене видно, использован ли скриншот платформы, model image или offline-template.
+- `avatar_manifest.json`: по каждой avatar-сцене видно, отправлена ли она в HeyGen или используется placeholder.
 - Storyboard/export metadata для монтажного профиля.
 - Мобильный клиент по умолчанию создаёт проект в стиле `ai_news_avatar`.
 
+## Что уже работает с внешними провайдерами
+
+- `HEYGEN_API_KEY` + `HEYGEN_AVATAR_ID`: `prepare-avatar` отправляет avatar-сцены в HeyGen и сохраняет `video_id/status/url`.
+- `HEYGEN_VOICE_ID`: можно указать голос HeyGen для аватарных сцен.
+- `ENABLE_MODEL_IMAGES=true` + `OPENAI_API_KEY`: `ai_broll` сцены могут получать оригинальные картинки через модель.
+- `ENABLE_BROWSER_SCREENSHOTS=true`: `screen_demo` и source scenes могут использовать реальные скриншоты сайтов вместо fallback-карточек.
+
 ## Что остается подключить для production-качества
 
-- Реальный avatar-provider для видео аватара, а не placeholder-портрет.
-- Генеративный video-provider для AI b-roll вместо статичного кадра.
+- Compositor, который вставляет скачанный HeyGen MP4 в финальный ролик как fullscreen/PIP, а не только хранит его в manifest/export package.
+- Генеративный video-provider для AI b-roll вместо статичной model image.
 - Загрузка пользовательских screen recordings и легальная библиотека b-roll.
 - Точная синхронизация губ/голоса, если используется реалистичный аватар.
 - Проверка прав на голос, лицо, логотипы, скриншоты и источники перед публикацией.

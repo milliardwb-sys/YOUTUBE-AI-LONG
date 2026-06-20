@@ -43,12 +43,13 @@ Visual policy: {visual_policy}
 Avatar enabled: {project.avatar_enabled}
 
 Return JSON object:
-{{"scenes":[{{"title":"short title","goal":"one sentence goal","narration":"natural voiceover text","on_screen_text":"short overlay text","visual_type":"ai_slide|screenshot|table|diagram","visual_prompt":"specific visual direction","notes":"source/production notes"}}]}}
+{{"scenes":[{{"title":"short title","goal":"one sentence goal","narration":"natural voiceover text","on_screen_text":"short overlay text","visual_type":"ai_slide|screenshot|table|diagram|avatar_fullscreen|avatar_pip|screen_demo|ai_broll|big_caption|cta","visual_prompt":"specific visual direction","notes":"source/production notes"}}]}}
 
 Rules:
 - Return exactly {scene_count} scenes.
 - Narration must be original, useful and ready for voiceover.
 - For screenshot scenes, describe what official page should be shown, not a video frame.
+- For ai_news_avatar, include fullscreen avatar, PIP avatar, screen demo, model-generated b-roll, big captions and CTA.
 - Do not mention that you are an AI.
 """.strip()
         response = self.client.chat.completions.create(
@@ -71,9 +72,21 @@ Rules:
             if not isinstance(item, dict):
                 continue
             visual_type = str(item.get("visual_type") or "ai_slide").strip()
-            if visual_type not in {"ai_slide", "screenshot", "table", "diagram"}:
+            allowed_types = {
+                "ai_slide",
+                "screenshot",
+                "table",
+                "diagram",
+                "avatar_fullscreen",
+                "avatar_pip",
+                "screen_demo",
+                "ai_broll",
+                "big_caption",
+                "cta",
+            }
+            if visual_type not in allowed_types:
                 visual_type = "ai_slide"
-            if project.visual_mode == VisualMode.ai_slides_only and visual_type == "screenshot":
+            if project.visual_mode == VisualMode.ai_slides_only and visual_type in {"screenshot", "screen_demo"}:
                 visual_type = "ai_slide"
             scenes.append(
                 Scene(
@@ -86,7 +99,8 @@ Rules:
                     visual_prompt=self._clean(item.get("visual_prompt"), None),
                     notes=self._clean(item.get("notes"), None),
                     duration_sec=base_duration,
-                    avatar_visible=project.avatar_enabled,
+                    avatar_visible=project.avatar_enabled
+                    and visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "ai_broll", "cta"},
                 )
             )
         if not scenes:

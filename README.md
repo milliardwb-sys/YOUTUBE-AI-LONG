@@ -16,15 +16,18 @@
 - генерация проекта через синхронный endpoint или через job queue;
 - генератор сценария без внешнего AI API;
 - опциональный LLM-провайдер OpenAI для сценариев;
+- опциональная генерация AI b-roll картинок через OpenAI Images;
 - безопасный fallback на шаблонный сценарий, если API-ключа нет или провайдер упал;
 - безопасный `SourceService`: user URLs + curated official websites;
 - `ScreenshotService` с офлайн fallback-карточками источников;
 - опциональный браузерный screenshot-capture через Playwright;
 - генератор 16:9 PNG-слайдов через Pillow;
-- режимы слайдов: `ai_slide`, `screenshot`, `table`, `diagram`;
+- режимы визуалов: `ai_slide`, `screenshot`, `table`, `diagram`, `avatar_fullscreen`, `avatar_pip`, `screen_demo`, `ai_broll`, `big_caption`, `cta`;
 - генератор WAV-аудио-заглушек;
 - опциональный OpenAI TTS-провайдер для озвучки;
 - `voice_manifest.json` с информацией по аудио каждой сцены;
+- `avatar_manifest.json` для HeyGen-задач и fallback-аватаров;
+- `visual_assets_manifest.json` для скриншотов платформ, model images и offline-шаблонов;
 - экспорт SRT и VTT;
 - рендер MP4 через FFmpeg;
 - thumbnail PNG + prompt для обложки;
@@ -55,7 +58,7 @@ API_KEY =
 ENABLE_USER_AUTH = false
 ```
 
-То есть архив можно запустить локально, получить слайды, аудио-заглушку и MP4. Если добавить `OPENAI_API_KEY`, можно включить `script_provider=openai` и `voice_provider=openai`.
+То есть архив можно запустить локально, получить слайды, аудио-заглушку и MP4. Если добавить `OPENAI_API_KEY`, можно включить `script_provider=openai`, `voice_provider=openai` и `ENABLE_MODEL_IMAGES=true`. Если добавить `HEYGEN_API_KEY` и `HEYGEN_AVATAR_ID`, шаг `prepare-avatar` начнёт отправлять avatar-сцены в HeyGen.
 
 Если задать `API_KEY`, все endpoints кроме `/health`, `/ready`, `/providers` и документации требуют заголовок `X-API-Key`. CORS настраивается через `CORS_ORIGINS`.
 
@@ -161,6 +164,9 @@ backend/data/projects/<project_id>/
 ```text
 project.json
 assets/sources/*.png
+assets/avatar/avatar_manifest.json
+assets/generated_images/*.png
+assets/visual_assets_manifest.json
 slides/*.png
 audio/*.wav
 video/final.mp4
@@ -334,6 +340,9 @@ export DEFAULT_VOICE_PROVIDER=openai
 export OPENAI_MODEL=gpt-4.1-mini
 export OPENAI_TTS_MODEL=gpt-4o-mini-tts
 export OPENAI_TTS_VOICE=alloy
+export ENABLE_MODEL_IMAGES=true
+export OPENAI_IMAGE_MODEL=gpt-image-1
+export OPENAI_IMAGE_SIZE=1536x1024
 uvicorn app.main:app --reload
 ```
 
@@ -347,7 +356,27 @@ uvicorn app.main:app --reload
 }
 ```
 
-Если ключ не задан или OpenAI недоступен, backend не падает: он пишет warning и использует template/placeholder fallback.
+Если ключ не задан или OpenAI недоступен, backend не падает: он пишет warning и использует template/placeholder/offline visual fallback.
+
+## Подключение HeyGen avatar provider
+
+`prepare-avatar` готовит аватарные сцены для HeyGen. Без ключей он создаёт `avatar_manifest.json` с placeholder-статусами, а с ключами отправляет каждую сцену `avatar_fullscreen`, `avatar_pip`, `screen_demo` и `cta` в HeyGen.
+
+```bash
+cd backend
+export HEYGEN_API_KEY="..."
+export HEYGEN_AVATAR_ID="..."
+export HEYGEN_VOICE_ID="..." # опционально
+export HEYGEN_RESOLUTION=1080p
+export HEYGEN_OUTPUT_FORMAT=mp4
+export HEYGEN_REMOVE_BACKGROUND=true
+export HEYGEN_ENABLE_MOTION_PROMPT=false
+export HEYGEN_POLL_SECONDS=0
+uvicorn app.main:app --reload
+```
+
+Если HeyGen вернул готовый `video_url`, backend попытается скачать MP4 в `assets/avatar`. Текущий render всё ещё собирает основной MP4 из PNG-кадров; HeyGen MP4 уже сохраняется как артефакт/манифест для следующего шага compositor/overlay.
+`HEYGEN_ENABLE_MOTION_PROMPT` по умолчанию выключен, потому что HeyGen принимает motion prompt не для всех avatar engine/avatar types.
 
 ## Реальные скриншоты сайтов
 
@@ -408,7 +437,7 @@ npm run audit:prod
 ## Что подключать следующим шагом
 
 1. Redis/BullMQ/Celery/Temporal вместо локальной job-системы.
-2. Реальный avatar-provider: HeyGen / D-ID / Tavus.
+2. Compositor для наложения скачанных HeyGen MP4 как fullscreen/PIP в финальный render.
 3. Voice consent flow и voice profiles.
 4. Полноценный Playwright worker и поиск official websites.
 5. Remotion-шаблоны вместо простых Pillow-слайдов.

@@ -666,11 +666,19 @@ export default function App() {
             {project.result?.quality_report_url ? (
               <Text style={styles.link}>Отчет качества: {project.result.quality_report_url}</Text>
             ) : null}
+            {project.result?.avatar_manifest_url ? (
+              <Text style={styles.link}>Манифест аватара: {project.result.avatar_manifest_url}</Text>
+            ) : null}
+            {project.result?.visual_assets_manifest_url ? (
+              <Text style={styles.link}>Манифест визуалов: {project.result.visual_assets_manifest_url}</Text>
+            ) : null}
             {project.result?.export_package_url ? (
               <Text style={styles.link}>Пакет экспорта: {project.result.export_package_url}</Text>
             ) : null}
             {project.scenes?.slice(0, 5).map((scene) => (
-              <Text key={scene.id} style={styles.scene}>#{scene.order} {scene.title} · {scene.visual_type}</Text>
+              <Text key={scene.id} style={styles.scene}>
+                #{scene.order} {scene.title} · {scene.visual_type}{scene.avatar_video_status ? ` · аватар: ${scene.avatar_video_status}` : ''}
+              </Text>
             ))}
             {project.sources?.slice(0, 4).map((source) => (
               <Text key={source.id} style={styles.source}>• {source.name} — {source.status}</Text>

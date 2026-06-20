@@ -620,6 +620,11 @@ class Scene(BaseModel):
     source_url: str | None = None
     visual_path: str | None = None
     audio_path: str | None = None
+    generated_image_path: str | None = None
+    avatar_video_id: str | None = None
+    avatar_video_status: str | None = None
+    avatar_video_url: str | None = None
+    avatar_video_path: str | None = None
 
 
 class ProjectResult(BaseModel):
@@ -635,6 +640,8 @@ class ProjectResult(BaseModel):
     youtube_metadata_path: str | None = None
     quality_report_path: str | None = None
     voice_manifest_path: str | None = None
+    avatar_manifest_path: str | None = None
+    visual_assets_manifest_path: str | None = None
     render_manifest_path: str | None = None
     export_package_path: str | None = None
     warnings: list[str] = Field(default_factory=list)

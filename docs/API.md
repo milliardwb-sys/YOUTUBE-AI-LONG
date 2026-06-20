@@ -241,6 +241,8 @@ All HTTP errors keep the legacy `detail` field and also include a structured `er
   "env": "local",
   "browser_screenshots": false,
   "openai_configured": false,
+  "model_images_enabled": false,
+  "heygen_configured": false,
   "run_jobs_inline": false,
   "job_workers": 2,
   "render_timeout_seconds": 1800,
@@ -304,6 +306,19 @@ The manifest includes project status, scene/source counts, scenes with visuals a
   "screenshots": {
     "browser_enabled": false,
     "timeout_ms": 12000
+  },
+  "visuals": {
+    "model_images_enabled": false,
+    "openai_image_model": "gpt-image-1",
+    "openai_image_size": "1536x1024"
+  },
+  "avatar": {
+    "provider": "heygen",
+    "configured": false,
+    "resolution": "1080p",
+    "output_format": "mp4",
+    "remove_background": true,
+    "motion_prompt_enabled": false
   },
   "jobs": {
     "available": [
@@ -622,7 +637,7 @@ voice_provider=openai      → OpenAI TTS; если ошибка, fallback на 
 
 ### POST /projects/{id}/generate-slides
 
-Создаёт PNG-слайды 16:9.
+Создаёт PNG-визуалы 16:9 и `visual_assets_manifest.json`.
 
 Типы слайдов:
 
@@ -631,11 +646,29 @@ ai_slide
 screenshot
 table
 diagram
+avatar_fullscreen
+avatar_pip
+screen_demo
+ai_broll
+big_caption
+cta
 ```
+
+Для `screen_demo` backend использует user URLs, search/curated official websites и fallback-карточки источников. Для `ai_broll` можно включить `ENABLE_MODEL_IMAGES=true`, тогда backend попробует создать оригинальную картинку через `OPENAI_IMAGE_MODEL`; при ошибке остаётся offline-template.
 
 ### POST /projects/{id}/prepare-avatar
 
-В v0.4 это placeholder-шаг. Он добавляет warning, если `avatar_enabled=true`, но внешний avatar-provider ещё не подключён.
+Готовит avatar-сцены через HeyGen или fallback-манифест.
+
+Логика:
+
+```text
+HEYGEN_API_KEY + HEYGEN_AVATAR_ID заданы → POST /v3/videos для avatar-сцен;
+ключи не заданы → avatar_manifest.json со статусом placeholder/provider_not_configured.
+```
+
+Для сцен `avatar_fullscreen`, `avatar_pip`, `screen_demo` и `cta` backend сохраняет `avatar_video_id`, `avatar_video_status`, `avatar_video_url` и, если доступен готовый файл, `avatar_video_path`. Текущий финальный render пока использует PNG-визуалы; HeyGen MP4 уже лежит как артефакт для следующего шага compositor/overlay.
+`HEYGEN_ENABLE_MOTION_PROMPT=false` по умолчанию: motion prompt включается вручную, потому что HeyGen поддерживает его не для всех avatar engine/avatar types.
 
 ### POST /projects/{id}/render
 
@@ -658,6 +691,8 @@ title_options.txt
 youtube_metadata.json
 quality_report.json
 voice_manifest.json
+avatar_manifest.json
+visual_assets_manifest.json
 render_manifest.json
 result_package.zip
 ```
@@ -776,6 +811,8 @@ render
   "youtube_metadata_url": "http://localhost:8000/files/.../youtube_metadata.json",
   "quality_report_url": "http://localhost:8000/files/.../quality_report.json",
   "voice_manifest_url": "http://localhost:8000/files/.../voice_manifest.json",
+  "avatar_manifest_url": "http://localhost:8000/files/.../avatar_manifest.json",
+  "visual_assets_manifest_url": "http://localhost:8000/files/.../visual_assets_manifest.json",
   "render_manifest_url": "http://localhost:8000/files/.../render_manifest.json",
   "export_package_url": "http://localhost:8000/files/.../result_package.zip"
 }

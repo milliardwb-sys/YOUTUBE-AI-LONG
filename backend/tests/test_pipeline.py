@@ -57,6 +57,18 @@ def make_settings(tmp_path: Path) -> Settings:
         openai_tts_model="gpt-4o-mini-tts",
         openai_tts_voice="alloy",
         max_openai_tts_chars=3800,
+        enable_model_images=False,
+        openai_image_model="gpt-image-1",
+        openai_image_size="1536x1024",
+        heygen_api_key=None,
+        heygen_api_base_url="https://api.heygen.com",
+        heygen_avatar_id=None,
+        heygen_voice_id=None,
+        heygen_resolution="1080p",
+        heygen_output_format="mp4",
+        heygen_remove_background=True,
+        heygen_enable_motion_prompt=False,
+        heygen_poll_seconds=0,
         burn_subtitles_by_default=False,
         run_jobs_inline=True,
         execute_jobs_in_api=True,
@@ -118,7 +130,7 @@ def make_pipeline(settings: Settings, store: ProjectStore) -> VideoPipeline:
         sources=SourceService(settings),
         visuals=VisualService(settings),
         voice=VoiceService(settings),
-        avatar=AvatarService(),
+        avatar=AvatarService(settings),
         render=RenderService(settings),
     )
 
@@ -213,10 +225,13 @@ def test_ai_news_avatar_style_generates_avatar_screen_and_broll_storyboard(tmp_p
 
     result = pipeline.generate_slides(result.id)
     manifest_path = store.project_dir(result.id) / "slides" / "render_templates.json"
+    visual_assets_path = Path(result.result.visual_assets_manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    visual_assets = json.loads(visual_assets_path.read_text(encoding="utf-8"))
     template_ids = {item["template_id"] for item in manifest}
     avatar_modes = {item["avatar_mode"] for item in manifest}
     asset_roles = {item["asset_role"] for item in manifest}
+    visual_strategies = {item["strategy"] for item in visual_assets}
 
     assert {
         "avatar_fullscreen_v1",
@@ -228,7 +243,79 @@ def test_ai_news_avatar_style_generates_avatar_screen_and_broll_storyboard(tmp_p
     } <= template_ids
     assert {"fullscreen", "picture_in_picture"} <= avatar_modes
     assert {"avatar_host", "screen_recording_or_source_insert", "generated_broll", "call_to_action"} <= asset_roles
+    assert "platform_screenshot_or_fallback_card" in visual_strategies
+    assert visual_assets_path.exists()
     assert all(Path(scene.visual_path).exists() for scene in result.scenes)
+
+
+def test_prepare_avatar_writes_manifest_without_heygen(tmp_path):
+    settings = make_settings(tmp_path)
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="AI-аватар для новостного YouTube-ролика",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+    result = pipeline.generate_script(project.id)
+    result = pipeline.prepare_avatar(result.id)
+    manifest_path = Path(result.result.avatar_manifest_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest_path.exists()
+    assert manifest["provider"] == "heygen"
+    assert manifest["status"] == "provider_not_configured"
+    assert manifest["scene_count"] > 0
+    assert all(item["status"] == "placeholder" for item in manifest["scenes"])
+    assert any("HeyGen не подключён" in warning for warning in result.result.warnings)
+
+
+def test_prepare_avatar_submits_heygen_jobs_when_configured(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    settings = Settings(
+        **{
+            **make_settings(tmp_path).__dict__,
+            "heygen_api_key": "heygen-test-key",
+            "heygen_avatar_id": "avatar_test",
+            "heygen_voice_id": "voice_test",
+        }
+    )
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="AI-ведущий показывает платформы для ролика",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def create_avatar_video(self, project, scene):
+            return {"video_id": f"vid_{scene.order:03d}", "status": "queued", "output_format": "mp4"}
+
+        def get_video(self, video_id):
+            return {"id": video_id, "status": "queued"}
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+
+    result = pipeline.generate_script(project.id)
+    result = pipeline.prepare_avatar(result.id)
+    avatar_scenes = [scene for scene in result.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
+    manifest = json.loads(Path(result.result.avatar_manifest_path).read_text(encoding="utf-8"))
+
+    assert avatar_scenes
+    assert all(scene.avatar_video_id for scene in avatar_scenes)
+    assert {item["heygen_status"] for item in manifest["scenes"]} == {"queued"}
+    assert manifest["configured"] is True
 
 
 def test_source_service_uses_search_provider_results(tmp_path):
@@ -817,6 +904,24 @@ def test_get_settings_requires_stripe_webhook_secret_in_production(tmp_path, mon
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
 
     with pytest.raises(ConfigurationError, match="STRIPE_WEBHOOK_SECRET"):
+        get_settings()
+
+
+def test_get_settings_requires_heygen_avatar_id_when_key_is_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("HEYGEN_API_KEY", "heygen-test-key")
+    monkeypatch.delenv("HEYGEN_AVATAR_ID", raising=False)
+
+    with pytest.raises(ConfigurationError, match="HEYGEN_AVATAR_ID"):
+        get_settings()
+
+
+def test_get_settings_requires_openai_key_for_model_images(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ENABLE_MODEL_IMAGES", "true")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
         get_settings()
 
 

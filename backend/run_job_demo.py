@@ -23,7 +23,7 @@ def build_pipeline(store: ProjectStore) -> VideoPipeline:
         sources=SourceService(settings),
         visuals=VisualService(settings),
         voice=VoiceService(settings),
-        avatar=AvatarService(),
+        avatar=AvatarService(settings),
         render=RenderService(settings),
     )
 
