@@ -10,6 +10,7 @@ from app.config import Settings
 from app.models import JobStatus, JobType, ProjectJob, ProjectStatus
 from app.pipeline import VideoPipeline
 from app.postgres_job_store import PostgresJobRepository
+from app.services.avatar_service import AVATAR_SCENE_TYPES, READY_STATUSES
 from app.utils.files import ensure_dir, read_json, write_json
 from app.utils.security import validate_job_id, validate_project_id
 
@@ -227,6 +228,21 @@ class JobRunner:
             completed.append(job)
         return completed
 
+    def queue_avatar_sync_candidates(self, *, limit: int = 10) -> list[ProjectJob]:
+        if not self.settings.heygen_api_key or not self.settings.heygen_avatar_id:
+            return []
+        queued: list[ProjectJob] = []
+        projects = sorted(self.pipeline.store.list_projects(), key=lambda item: (item.updated_at, item.id))
+        for project in projects:
+            if len(queued) >= max(1, limit):
+                break
+            if self.job_store.active_for_project(project.id):
+                continue
+            if not self._should_queue_avatar_sync(project):
+                continue
+            queued.append(self.start(project.id, JobType.sync_avatar, owner_id=project.owner_id))
+        return queued
+
     def cancel(self, job_id: str) -> ProjectJob:
         job = self.job_store.cancel(job_id)
         try:
@@ -315,9 +331,11 @@ class JobRunner:
         name, progress, fn = step
         self._update(job, progress=25, step=f"starting_{name}")
         self._raise_if_cancelled(job.id)
-        fn(job.project_id)
+        project = fn(job.project_id)
         self._raise_if_cancelled(job.id)
         self._update(job, progress=progress, step=f"finished_{name}")
+        if job.type == JobType.sync_avatar:
+            self._auto_render_after_avatar_sync(job, project)
 
     def _run_generate_all(self, job: ProjectJob) -> None:
         workflow: list[tuple[str, int, Callable[[str], object]]] = [
@@ -337,6 +355,65 @@ class JobRunner:
             self._update(job, progress=progress, step=f"finished_{name}")
             if project.status == ProjectStatus.failed:
                 raise RuntimeError(project.error or f"Project failed at {name}")
+
+    def _auto_render_after_avatar_sync(self, job: ProjectJob, project) -> None:
+        if not self.settings.avatar_auto_render_after_sync:
+            return
+        if not self._should_auto_render_after_avatar_sync(project):
+            return
+        self._update(job, progress=92, step="starting_auto_render")
+        self._raise_if_cancelled(job.id)
+        rendered = self.pipeline.render(job.project_id)
+        self._raise_if_cancelled(job.id)
+        self._update(job, progress=98, step="finished_auto_render")
+        if rendered.status == ProjectStatus.failed:
+            raise RuntimeError(rendered.error or "Project failed during auto render")
+
+    def _should_queue_avatar_sync(self, project) -> bool:
+        if not project.avatar_enabled:
+            return False
+        if not self._has_pending_avatar_downloads(project):
+            return False
+        last_sync = next((job for job in self.job_store.list_for_project(project.id) if job.type == JobType.sync_avatar), None)
+        if last_sync is None:
+            return True
+        elapsed = datetime.now(timezone.utc) - last_sync.updated_at
+        return elapsed.total_seconds() >= self.settings.avatar_auto_sync_interval_seconds
+
+    def _has_pending_avatar_downloads(self, project) -> bool:
+        for scene in project.scenes:
+            if not scene.avatar_visible or scene.visual_type not in AVATAR_SCENE_TYPES:
+                continue
+            if not scene.avatar_video_id:
+                continue
+            if (scene.avatar_video_status or "").lower() == "failed":
+                continue
+            if not self._path_exists(scene.avatar_video_path):
+                return True
+        return False
+
+    def _should_auto_render_after_avatar_sync(self, project) -> bool:
+        if not project.avatar_enabled or not project.scenes:
+            return False
+        avatar_scenes = [
+            scene
+            for scene in project.scenes
+            if scene.avatar_visible and scene.visual_type in AVATAR_SCENE_TYPES
+        ]
+        if not avatar_scenes:
+            return False
+        if any((scene.avatar_video_status or "").lower() not in READY_STATUSES for scene in avatar_scenes):
+            return False
+        if any(not self._path_exists(scene.avatar_video_path) for scene in avatar_scenes):
+            return False
+        if any(not self._path_exists(scene.visual_path) or not self._path_exists(scene.audio_path) for scene in project.scenes):
+            return False
+        if self._path_exists(project.result.final_video_path):
+            return False
+        return True
+
+    def _path_exists(self, path_value: str | None) -> bool:
+        return bool(path_value and Path(path_value).exists())
 
     def _update(self, job: ProjectJob, *, progress: int, step: str) -> None:
         fresh = self.job_store.get(job.id)

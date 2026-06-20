@@ -324,7 +324,10 @@ The manifest includes project status, scene/source counts, avatar video counts, 
     "resolution": "1080p",
     "output_format": "mp4",
     "remove_background": true,
-    "motion_prompt_enabled": false
+    "motion_prompt_enabled": false,
+    "auto_sync_enabled": false,
+    "auto_sync_interval_seconds": 60,
+    "auto_render_after_sync": true
   },
   "jobs": {
     "available": [

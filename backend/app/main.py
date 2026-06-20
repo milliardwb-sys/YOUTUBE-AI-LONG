@@ -1375,6 +1375,9 @@ def providers() -> dict:
             "output_format": settings.heygen_output_format,
             "remove_background": settings.heygen_remove_background,
             "motion_prompt_enabled": settings.heygen_enable_motion_prompt,
+            "auto_sync_enabled": settings.avatar_auto_sync_enabled,
+            "auto_sync_interval_seconds": settings.avatar_auto_sync_interval_seconds,
+            "auto_render_after_sync": settings.avatar_auto_render_after_sync,
         },
         "search": {
             "provider": settings.search_provider,

@@ -36,6 +36,22 @@ The worker runs:
 python backend\job_worker.py --poll-interval 5 --limit 1
 ```
 
+For automatic HeyGen avatar polling:
+
+```powershell
+python backend\job_worker.py --auto-avatar-sync --poll-interval 10 --limit 2
+```
+
+Or enable it through environment:
+
+```env
+AVATAR_AUTO_SYNC_ENABLED=true
+AVATAR_AUTO_SYNC_INTERVAL_SECONDS=60
+AVATAR_AUTO_RENDER_AFTER_SYNC=true
+```
+
+`auto-avatar-sync` only queues `sync_avatar` for projects that already have HeyGen `avatar_video_id` values and missing local MP4 files. It does not create new HeyGen avatar jobs. When all avatar MP4s, scene visuals and scene audio are ready, `AVATAR_AUTO_RENDER_AFTER_SYNC=true` lets the `sync_avatar` job run `render` automatically.
+
 For a single polling pass:
 
 ```powershell

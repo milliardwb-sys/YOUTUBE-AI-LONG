@@ -53,6 +53,9 @@ class Settings:
     heygen_remove_background: bool
     heygen_enable_motion_prompt: bool
     heygen_poll_seconds: int
+    avatar_auto_sync_enabled: bool
+    avatar_auto_sync_interval_seconds: int
+    avatar_auto_render_after_sync: bool
     burn_subtitles_by_default: bool
     run_jobs_inline: bool
     execute_jobs_in_api: bool
@@ -196,6 +199,9 @@ def get_settings() -> Settings:
         heygen_remove_background=_env_bool("HEYGEN_REMOVE_BACKGROUND", True),
         heygen_enable_motion_prompt=_env_bool("HEYGEN_ENABLE_MOTION_PROMPT", False),
         heygen_poll_seconds=max(0, _env_int("HEYGEN_POLL_SECONDS", 0)),
+        avatar_auto_sync_enabled=_env_bool("AVATAR_AUTO_SYNC_ENABLED", False),
+        avatar_auto_sync_interval_seconds=max(15, _env_int("AVATAR_AUTO_SYNC_INTERVAL_SECONDS", 60)),
+        avatar_auto_render_after_sync=_env_bool("AVATAR_AUTO_RENDER_AFTER_SYNC", True),
         burn_subtitles_by_default=_env_bool("BURN_SUBTITLES_BY_DEFAULT", False),
         run_jobs_inline=_env_bool("RUN_JOBS_INLINE", False),
         execute_jobs_in_api=_env_bool("EXECUTE_JOBS_IN_API", True),

@@ -385,6 +385,9 @@ export HEYGEN_OUTPUT_FORMAT=mp4
 export HEYGEN_REMOVE_BACKGROUND=true
 export HEYGEN_ENABLE_MOTION_PROMPT=false
 export HEYGEN_POLL_SECONDS=0
+export AVATAR_AUTO_SYNC_ENABLED=true
+export AVATAR_AUTO_SYNC_INTERVAL_SECONDS=60
+export AVATAR_AUTO_RENDER_AFTER_SYNC=true
 uvicorn app.main:app --reload
 ```
 
@@ -392,6 +395,14 @@ uvicorn app.main:app --reload
 `HEYGEN_ENABLE_MOTION_PROMPT` по умолчанию выключен, потому что HeyGen принимает motion prompt не для всех avatar engine/avatar types.
 
 После первичной отправки можно вызывать `POST /projects/<project_id>/sync-avatar`: backend проверит статусы уже созданных HeyGen-задач и скачает готовые MP4, не создавая новые jobs. В production-режиме удобнее запускать это через очередь: `POST /projects/<project_id>/jobs/sync_avatar`. Если конкретная сцена неудачная или текст был изменён, `POST /projects/<project_id>/scenes/<scene_id>/retry-avatar` сбросит старый `avatar_video_id/status/url/path` и отправит в HeyGen только эту сцену.
+
+Для автоматического polling запустите worker:
+
+```bash
+python backend/job_worker.py --auto-avatar-sync --poll-interval 10 --limit 2
+```
+
+Worker сам найдёт проекты, где уже есть HeyGen `avatar_video_id`, но локальный MP4 ещё не скачан, и поставит `sync_avatar` с backoff `AVATAR_AUTO_SYNC_INTERVAL_SECONDS`. Если после sync все avatar MP4, визуалы и аудио готовы, а финальный MP4 ещё не собран, `AVATAR_AUTO_RENDER_AFTER_SYNC=true` автоматически запустит render.
 
 ## Реальные скриншоты сайтов
 

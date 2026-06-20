@@ -37,17 +37,28 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="Run one polling pass and exit.")
     parser.add_argument("--limit", type=int, default=1, help="Maximum queued jobs to run per polling pass.")
     parser.add_argument("--poll-interval", type=float, default=5.0, help="Seconds to wait between polling passes.")
+    parser.add_argument(
+        "--auto-avatar-sync",
+        action="store_true",
+        help="Queue sync_avatar jobs for projects with pending HeyGen avatar videos.",
+    )
     args = parser.parse_args()
 
     runner = build_runner()
+    auto_avatar_sync = args.auto_avatar_sync or runner.settings.avatar_auto_sync_enabled
     print("AI Video Studio worker started")
     try:
         while True:
+            queued_avatar_jobs = []
+            if auto_avatar_sync:
+                queued_avatar_jobs = runner.queue_avatar_sync_candidates(limit=max(1, args.limit))
+                for job in queued_avatar_jobs:
+                    print(f"auto_avatar_sync job={job.id} status={job.status.value} project={job.project_id}")
             jobs = runner.run_queued_batch(limit=max(1, args.limit))
             for job in jobs:
                 print(f"job={job.id} status={job.status.value} progress={job.progress} project={job.project_id}")
             if args.once:
-                if not jobs:
+                if not jobs and not queued_avatar_jobs:
                     print("No queued jobs")
                 return 0
             if not jobs:

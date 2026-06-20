@@ -69,6 +69,9 @@ def make_settings(tmp_path: Path) -> Settings:
         heygen_remove_background=True,
         heygen_enable_motion_prompt=False,
         heygen_poll_seconds=0,
+        avatar_auto_sync_enabled=False,
+        avatar_auto_sync_interval_seconds=60,
+        avatar_auto_render_after_sync=True,
         burn_subtitles_by_default=False,
         run_jobs_inline=True,
         execute_jobs_in_api=True,
@@ -432,6 +435,124 @@ def test_inline_job_runner_sync_avatar_job(tmp_path, monkeypatch):
     assert result.current_step == "avatar_synced"
     assert avatar_scenes
     assert all(scene.avatar_video_path and Path(scene.avatar_video_path).exists() for scene in avatar_scenes)
+
+
+def test_job_runner_queues_avatar_sync_candidates_with_backoff(tmp_path):
+    settings = Settings(
+        **{
+            **make_settings(tmp_path).__dict__,
+            "heygen_api_key": "heygen-test-key",
+            "heygen_avatar_id": "avatar_test",
+            "run_jobs_inline": False,
+            "execute_jobs_in_api": False,
+            "avatar_auto_sync_enabled": True,
+            "avatar_auto_sync_interval_seconds": 60,
+        }
+    )
+    store = ProjectStore(settings)
+    pipeline = make_pipeline(settings, store)
+    job_store = JobStore(settings)
+    runner = JobRunner(settings, pipeline, job_store)
+    project = store.create_project(
+        ProjectCreate(
+            topic="Worker сам найдёт pending avatar video",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    project = pipeline.generate_script(project.id)
+    target = next(scene for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"})
+    target.avatar_video_id = "vid_pending"
+    target.avatar_video_status = "processing"
+    store.save(project)
+
+    queued = runner.queue_avatar_sync_candidates(limit=5)
+    queued_again = runner.queue_avatar_sync_candidates(limit=5)
+
+    assert len(queued) == 1
+    assert queued[0].type == JobType.sync_avatar
+    assert queued[0].status == JobStatus.queued
+    assert queued_again == []
+    assert job_store.active_for_project(project.id).id == queued[0].id
+
+
+def test_sync_avatar_job_auto_renders_when_avatar_assets_ready(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    settings = Settings(
+        **{
+            **make_settings(tmp_path).__dict__,
+            "heygen_api_key": "heygen-test-key",
+            "heygen_avatar_id": "avatar_test",
+            "heygen_voice_id": "voice_test",
+            "avatar_auto_render_after_sync": True,
+        }
+    )
+    store = ProjectStore(settings)
+    pipeline = make_pipeline(settings, store)
+    job_store = JobStore(settings)
+    runner = JobRunner(settings, pipeline, job_store)
+    project = store.create_project(
+        ProjectCreate(
+            topic="Auto render после готовности HeyGen avatar MP4",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def create_avatar_video(self, project, scene):
+            raise AssertionError("sync_avatar auto-render test must not create HeyGen jobs")
+
+        def get_video(self, video_id):
+            return {"id": video_id, "status": "completed", "video_url": f"https://video.local/{video_id}.mp4"}
+
+        def download_video(self, video_url, output_path):
+            output_path.write_bytes(b"fake avatar mp4 placeholder")
+            return output_path
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+
+    project = pipeline.generate_script(project.id)
+    project = pipeline.generate_slides(project.id)
+    project = pipeline.generate_voice(project.id)
+    for scene in project.scenes:
+        if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}:
+            scene.avatar_video_id = f"vid_{scene.order:03d}"
+            scene.avatar_video_status = "processing"
+    store.save(project)
+
+    render_calls: list[str] = []
+
+    def fake_render(project_id: str):
+        render_calls.append(project_id)
+        fresh = store.get(project_id)
+        final_path = store.project_dir(project_id) / "video" / "final.mp4"
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        final_path.write_bytes(b"fake final mp4")
+        fresh.result.final_video_path = str(final_path)
+        fresh.status = ProjectStatus.completed
+        fresh.error = None
+        fresh.touch("completed")
+        store.save(fresh)
+        return fresh
+
+    pipeline.render = fake_render
+
+    job = runner.start(project.id, JobType.sync_avatar)
+    saved_job = job_store.get(job.id)
+    result = store.get(project.id)
+
+    assert saved_job.status == JobStatus.completed
+    assert render_calls == [project.id]
+    assert result.status == ProjectStatus.completed
+    assert Path(result.result.final_video_path).exists()
+    assert any(event["message"] == "starting_auto_render" for event in saved_job.events)
 
 
 def test_retry_avatar_scene_resets_old_job_and_resubmits_one_scene(tmp_path, monkeypatch):
@@ -2403,6 +2524,7 @@ def test_worker_cli_help_loads(tmp_path):
 
     assert result.returncode == 0
     assert "queued AI Video Studio jobs" in result.stdout
+    assert "--auto-avatar-sync" in result.stdout
 
 
 def test_job_store_rejects_cancelling_terminal_job(tmp_path):
