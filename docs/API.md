@@ -667,12 +667,12 @@ HEYGEN_API_KEY + HEYGEN_AVATAR_ID заданы → POST /v3/videos для avatar
 ключи не заданы → avatar_manifest.json со статусом placeholder/provider_not_configured.
 ```
 
-Для сцен `avatar_fullscreen`, `avatar_pip`, `screen_demo` и `cta` backend сохраняет `avatar_video_id`, `avatar_video_status`, `avatar_video_url` и, если доступен готовый файл, `avatar_video_path`. Текущий финальный render пока использует PNG-визуалы; HeyGen MP4 уже лежит как артефакт для следующего шага compositor/overlay.
+Для сцен `avatar_fullscreen`, `avatar_pip`, `screen_demo` и `cta` backend сохраняет `avatar_video_id`, `avatar_video_status`, `avatar_video_url` и, если доступен готовый файл, `avatar_video_path`. Если у сцены есть локальный `avatar_video_path`, `render` использует avatar-video compositor: fullscreen-сцены берут видео аватара как основной кадр, PIP/screen/CTA-сцены накладывают видео поверх PNG-визуала.
 `HEYGEN_ENABLE_MOTION_PROMPT=false` по умолчанию: motion prompt включается вручную, потому что HeyGen поддерживает его не для всех avatar engine/avatar types.
 
 ### POST /projects/{id}/render
 
-Собирает `final.mp4` через FFmpeg и создаёт export package.
+Собирает `final.mp4` через FFmpeg и создаёт export package. Если локальные avatar MP4 отсутствуют, используется обычный slideshow render. Если есть `avatar_video_path`, backend рендерит per-scene segments и собирает avatar composite video.
 
 Если `FFMPEG_BIN` отсутствует в PATH, backend пробует bundled fallback из `imageio-ffmpeg`. Если ни один FFmpeg binary не найден, проект получает `failed`, но backend всё равно создаёт manifest/export package с доступными артефактами. В синхронном HTTP endpoint это будет `500`; в job mode ошибка попадёт в `job.error`.
 

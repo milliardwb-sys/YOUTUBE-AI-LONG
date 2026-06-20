@@ -375,7 +375,7 @@ export HEYGEN_POLL_SECONDS=0
 uvicorn app.main:app --reload
 ```
 
-Если HeyGen вернул готовый `video_url`, backend попытается скачать MP4 в `assets/avatar`. Текущий render всё ещё собирает основной MP4 из PNG-кадров; HeyGen MP4 уже сохраняется как артефакт/манифест для следующего шага compositor/overlay.
+Если HeyGen вернул готовый `video_url`, backend попытается скачать MP4 в `assets/avatar`. При наличии локального `avatar_video_path` финальный render использует avatar-video compositor: `avatar_fullscreen` идёт на весь экран, а `avatar_pip`, `screen_demo` и `cta` накладываются поверх PNG-визуала как PIP. Если MP4 ещё не готов, остаётся slideshow fallback.
 `HEYGEN_ENABLE_MOTION_PROMPT` по умолчанию выключен, потому что HeyGen принимает motion prompt не для всех avatar engine/avatar types.
 
 ## Реальные скриншоты сайтов
@@ -437,7 +437,7 @@ npm run audit:prod
 ## Что подключать следующим шагом
 
 1. Redis/BullMQ/Celery/Temporal вместо локальной job-системы.
-2. Compositor для наложения скачанных HeyGen MP4 как fullscreen/PIP в финальный render.
+2. Улучшенный video compositor: прозрачный фон, маски, motion transitions и точное lipsync-таймирование.
 3. Voice consent flow и voice profiles.
 4. Полноценный Playwright worker и поиск official websites.
 5. Remotion-шаблоны вместо простых Pillow-слайдов.

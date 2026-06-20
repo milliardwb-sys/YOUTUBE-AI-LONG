@@ -613,6 +613,79 @@ def test_inline_job_runner_generate_all(tmp_path):
     assert any(event["event"] == "progress" for event in saved_job.events)
 
 
+def test_render_service_composites_local_avatar_video(tmp_path):
+    settings = make_settings(tmp_path)
+    renderer = RenderService(settings)
+    ffmpeg_bin = renderer.resolve_ffmpeg_bin()
+    if not ffmpeg_bin:
+        pytest.skip("FFmpeg is not available")
+
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="AI-ведущий поверх демонстрации экрана",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            visual_mode=VisualMode.official_sites_plus_ai,
+            source_urls=["https://www.heygen.com/"],
+            avatar_enabled=True,
+            avatar_position="bottom_left",
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+    project = pipeline.generate_script(project.id)
+    project = pipeline.collect_sources(project.id)
+    project = pipeline.generate_slides(project.id)
+    project = pipeline.generate_voice(project.id)
+
+    avatar_dir = store.project_dir(project.id) / "assets" / "avatar"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    avatar_path = avatar_dir / "test_avatar.mp4"
+    subprocess.run(
+        [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x2563eb:s=320x180:r=15",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=mono",
+            "-t",
+            "1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(avatar_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    avatar_scene = next(scene for scene in project.scenes if scene.visual_type in {"avatar_pip", "screen_demo", "cta"})
+    avatar_scene.avatar_video_id = "test_avatar_video"
+    avatar_scene.avatar_video_status = "completed"
+    avatar_scene.avatar_video_path = str(avatar_path)
+    store.save(project)
+
+    result = pipeline.render(project.id)
+    render_manifest = json.loads(Path(result.result.render_manifest_path).read_text(encoding="utf-8"))
+    quality_report = json.loads(Path(result.result.quality_report_path).read_text(encoding="utf-8"))
+
+    assert result.status == ProjectStatus.completed
+    assert Path(result.result.final_video_path).exists()
+    assert render_manifest["render_mode"] == "avatar_video_composite"
+    assert avatar_scene.id in quality_report["avatar_composited_scene_ids"]
+    assert quality_report["checks"]["uses_avatar_video_compositor"] is True
+    with ZipFile(result.result.export_package_path) as archive:
+        assert "avatar/test_avatar.mp4" in archive.namelist()
+
+
 def test_render_service_resolves_ffmpeg_binary(tmp_path):
     settings = make_settings(tmp_path)
     resolver = RenderService(settings)

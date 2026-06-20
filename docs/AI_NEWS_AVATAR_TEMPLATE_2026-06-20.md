@@ -37,12 +37,13 @@
 
 - `HEYGEN_API_KEY` + `HEYGEN_AVATAR_ID`: `prepare-avatar` отправляет avatar-сцены в HeyGen и сохраняет `video_id/status/url`.
 - `HEYGEN_VOICE_ID`: можно указать голос HeyGen для аватарных сцен.
+- Avatar-video compositor: если HeyGen MP4 скачан в `avatar_video_path`, render вставляет его как fullscreen или PIP.
 - `ENABLE_MODEL_IMAGES=true` + `OPENAI_API_KEY`: `ai_broll` сцены могут получать оригинальные картинки через модель.
 - `ENABLE_BROWSER_SCREENSHOTS=true`: `screen_demo` и source scenes могут использовать реальные скриншоты сайтов вместо fallback-карточек.
 
 ## Что остается подключить для production-качества
 
-- Compositor, который вставляет скачанный HeyGen MP4 в финальный ролик как fullscreen/PIP, а не только хранит его в manifest/export package.
+- Улучшенный compositor: прозрачный фон, маски, motion transitions и точная синхронизация с озвучкой.
 - Генеративный video-provider для AI b-roll вместо статичной model image.
 - Загрузка пользовательских screen recordings и легальная библиотека b-roll.
 - Точная синхронизация губ/голоса, если используется реалистичный аватар.

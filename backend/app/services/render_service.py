@@ -40,6 +40,8 @@ class RenderService:
             "fps": self.settings.render_fps,
             "style": project.style,
             "montage_profile": self._montage_profile(project),
+            "render_mode": self._render_mode(project),
+            "avatar_composite_scene_ids": [scene.id for scene in project.scenes if scene.avatar_video_path],
             "visual_mode": project.visual_mode,
             "brand_theme": project.brand_theme,
             "script_provider": project.script_provider,
@@ -69,18 +71,20 @@ class RenderService:
             self._create_export_package(project, project_dir)
             return project
 
-        slideshow_file = render_dir / "slides_concat.txt"
-        self._write_slideshow_concat(project, project_dir, slideshow_file)
-
-        full_audio = render_dir / "full_audio.wav"
-        audio_paths = [
-            self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio", strict=True)
-            for scene in project.scenes
-        ]
-        self._merge_wav_files(audio_paths, full_audio)
-
         final_video = render_dir / "final.mp4"
-        self._render_slideshow(project, slideshow_file, full_audio, final_video, ffmpeg_bin)
+        if self._has_avatar_video_assets(project, project_dir):
+            self._render_avatar_composite(project, project_dir, render_dir, final_video, ffmpeg_bin)
+        else:
+            slideshow_file = render_dir / "slides_concat.txt"
+            self._write_slideshow_concat(project, project_dir, slideshow_file)
+
+            full_audio = render_dir / "full_audio.wav"
+            audio_paths = [
+                self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio", strict=True)
+                for scene in project.scenes
+            ]
+            self._merge_wav_files(audio_paths, full_audio)
+            self._render_slideshow(project, slideshow_file, full_audio, final_video, ffmpeg_bin)
 
         project.result.final_video_path = str(final_video)
         self._write_exports(project, project_dir)
@@ -187,6 +191,222 @@ class RenderService:
             str(final_video),
         ]
         self._run(cmd)
+
+    def _render_avatar_composite(
+        self,
+        project: Project,
+        project_dir: Path,
+        render_dir: Path,
+        final_video: Path,
+        ffmpeg_bin: str,
+    ) -> None:
+        segments_dir = ensure_dir(render_dir / "segments")
+        segment_paths: list[Path] = []
+        for scene in project.scenes:
+            segment_path = segments_dir / f"scene_{scene.order:03d}.mp4"
+            image_path = self._safe_existing_project_file(project, project_dir, scene.visual_path, f"Scene {scene.order} visual", strict=True)
+            audio_path = self._safe_existing_project_file(project, project_dir, scene.audio_path, f"Scene {scene.order} audio", strict=True)
+            avatar_path = self._safe_existing_project_file(project, project_dir, scene.avatar_video_path, f"Scene {scene.order} avatar video")
+            if avatar_path and scene.visual_type == "avatar_fullscreen":
+                self._render_fullscreen_avatar_segment(scene, avatar_path, audio_path, segment_path, ffmpeg_bin)
+            elif avatar_path:
+                self._render_pip_avatar_segment(project, scene, image_path, avatar_path, audio_path, segment_path, ffmpeg_bin)
+            else:
+                self._render_still_segment(scene, image_path, audio_path, segment_path, ffmpeg_bin)
+            segment_paths.append(segment_path)
+
+        concat_file = render_dir / "segments_concat.txt"
+        concat_file.write_text(
+            "\n".join(f"file '{path.resolve().as_posix()}'" for path in segment_paths),
+            encoding="utf-8",
+        )
+        concat_output = render_dir / "final_avatar_composite.mp4"
+        self._run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_file),
+                "-c",
+                "copy",
+                str(concat_output),
+            ]
+        )
+        self._finalize_composited_video(project, concat_output, final_video, ffmpeg_bin)
+
+    def _render_still_segment(self, scene, image_path: Path, audio_path: Path, segment_path: Path, ffmpeg_bin: str) -> None:
+        video_filter = f"scale={self.settings.render_width}:{self.settings.render_height},format=yuv420p"
+        self._run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-loop",
+                "1",
+                "-t",
+                str(scene.duration_sec),
+                "-i",
+                str(image_path),
+                "-i",
+                str(audio_path),
+                "-vf",
+                video_filter,
+                "-r",
+                str(self.settings.render_fps),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "stillimage",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(segment_path),
+            ]
+        )
+
+    def _render_fullscreen_avatar_segment(self, scene, avatar_path: Path, audio_path: Path, segment_path: Path, ffmpeg_bin: str) -> None:
+        video_filter = (
+            f"scale={self.settings.render_width}:{self.settings.render_height}:force_original_aspect_ratio=increase,"
+            f"crop={self.settings.render_width}:{self.settings.render_height},format=yuv420p"
+        )
+        self._run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-stream_loop",
+                "-1",
+                "-i",
+                str(avatar_path),
+                "-i",
+                str(audio_path),
+                "-t",
+                str(scene.duration_sec),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-vf",
+                video_filter,
+                "-r",
+                str(self.settings.render_fps),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(segment_path),
+            ]
+        )
+
+    def _render_pip_avatar_segment(
+        self,
+        project: Project,
+        scene,
+        image_path: Path,
+        avatar_path: Path,
+        audio_path: Path,
+        segment_path: Path,
+        ffmpeg_bin: str,
+    ) -> None:
+        pip_w, pip_x, pip_y = self._pip_geometry(project, scene)
+        filter_complex = (
+            f"[0:v]scale={self.settings.render_width}:{self.settings.render_height},setsar=1[bg];"
+            f"[1:v]scale={pip_w}:-2,setsar=1[pip];"
+            f"[bg][pip]overlay={pip_x}:{pip_y}:format=auto,format=yuv420p[v]"
+        )
+        self._run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-loop",
+                "1",
+                "-t",
+                str(scene.duration_sec),
+                "-i",
+                str(image_path),
+                "-stream_loop",
+                "-1",
+                "-i",
+                str(avatar_path),
+                "-i",
+                str(audio_path),
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[v]",
+                "-map",
+                "2:a:0",
+                "-t",
+                str(scene.duration_sec),
+                "-r",
+                str(self.settings.render_fps),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(segment_path),
+            ]
+        )
+
+    def _finalize_composited_video(self, project: Project, source_video: Path, final_video: Path, ffmpeg_bin: str) -> None:
+        if project.burn_subtitles:
+            if project.result.subtitles_path and Path(project.result.subtitles_path).exists():
+                escaped = Path(project.result.subtitles_path).resolve().as_posix().replace("'", "\\'")
+                self._run(
+                    [
+                        ffmpeg_bin,
+                        "-y",
+                        "-i",
+                        str(source_video),
+                        "-vf",
+                        f"subtitles='{escaped}',format=yuv420p",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "ultrafast",
+                        "-c:a",
+                        "copy",
+                        str(final_video),
+                    ]
+                )
+                return
+            warning = "burn_subtitles=true, but subtitles file was not found; avatar composite rendered without burned captions."
+            if warning not in project.result.warnings:
+                project.result.warnings.append(warning)
+        shutil.copyfile(source_video, final_video)
+
+    def _pip_geometry(self, project: Project, scene) -> tuple[int, int, int]:
+        pip_w = max(260, int(self.settings.render_width * (0.22 if scene.visual_type == "cta" else 0.2)))
+        pip_h = int(pip_w * 9 / 16)
+        margin_x = max(60, int(self.settings.render_width * 0.055))
+        margin_y = max(55, int(self.settings.render_height * 0.07))
+        position = project.avatar_position
+        if scene.visual_type == "cta":
+            position = "top_right"
+        if position == "bottom_left":
+            return pip_w, margin_x, self.settings.render_height - margin_y - pip_h
+        if position == "top_left":
+            return pip_w, margin_x, margin_y
+        if position == "top_right":
+            return pip_w, self.settings.render_width - margin_x - pip_w, margin_y
+        return pip_w, self.settings.render_width - margin_x - pip_w, self.settings.render_height - margin_y - pip_h
+
+    def _has_avatar_video_assets(self, project: Project, project_dir: Path) -> bool:
+        return any(
+            self._safe_existing_project_file(project, project_dir, scene.avatar_video_path, f"Scene {scene.order} avatar video")
+            for scene in project.scenes
+            if scene.avatar_video_path
+        )
 
     def _run(self, cmd: list[str]) -> None:
         try:
@@ -431,6 +651,7 @@ class RenderService:
         missing_audio = [scene.id for scene in project.scenes if not scene.audio_path or not Path(scene.audio_path).exists()]
         avatar_scene_ids = [scene.id for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
         avatar_ready_ids = [scene.id for scene in project.scenes if scene.avatar_video_id or scene.avatar_video_path]
+        avatar_composited_ids = [scene.id for scene in project.scenes if scene.avatar_video_path]
         generated_image_ids = [scene.id for scene in project.scenes if scene.generated_image_path]
         fallback_sources = [source.id for source in project.sources if source.status == "fallback_card"]
         captured_sources = [source.id for source in project.sources if source.status == "captured"]
@@ -456,6 +677,7 @@ class RenderService:
                 "has_subtitles": bool(project.result.subtitles_path),
                 "has_avatar_manifest": bool(project.result.avatar_manifest_path),
                 "has_visual_assets_manifest": bool(project.result.visual_assets_manifest_path),
+                "uses_avatar_video_compositor": bool(avatar_composited_ids),
                 "ai_news_avatar_structure": (
                     {"avatar_fullscreen", "avatar_pip", "screen_demo", "ai_broll", "big_caption", "cta"} <= visual_types
                     if project.style.value == "ai_news_avatar"
@@ -467,6 +689,7 @@ class RenderService:
             "missing_audio_scene_ids": missing_audio,
             "avatar_scene_ids": avatar_scene_ids,
             "avatar_ready_scene_ids": avatar_ready_ids,
+            "avatar_composited_scene_ids": avatar_composited_ids,
             "generated_image_scene_ids": generated_image_ids,
             "captured_source_ids": captured_sources,
             "fallback_source_ids": fallback_sources,
@@ -483,6 +706,11 @@ class RenderService:
         if project.style.value == "ai_news_avatar":
             return "ai_news_avatar_fast_retention"
         return "standard_slideshow"
+
+    def _render_mode(self, project: Project) -> str:
+        if any(scene.avatar_video_path for scene in project.scenes):
+            return "avatar_video_composite"
+        return "slideshow"
 
     def _storyboard_scene_role(self, scene) -> dict[str, object]:
         return {
