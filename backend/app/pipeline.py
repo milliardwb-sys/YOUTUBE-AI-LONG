@@ -102,6 +102,8 @@ class VideoPipeline:
             self.store.save(p)
             p = self.avatar.prepare_avatar_overlay(p, project_dir)
             self.store.save(p)
+            p = self.avatar.sync_avatar_statuses(p, project_dir)
+            self.store.save(p)
             p = self.render_service.render(p, project_dir)
             return p
 

@@ -91,6 +91,7 @@ class JobType(str, Enum):
     generate_slides = "generate_slides"
     generate_voice = "generate_voice"
     prepare_avatar = "prepare_avatar"
+    sync_avatar = "sync_avatar"
     render = "render"
     generate_all = "generate_all"
 

@@ -223,6 +223,12 @@ curl -X POST http://localhost:8000/projects \
 curl -X POST http://localhost:8000/projects/<project_id>/jobs/generate_all
 ```
 
+Для повторной фоновой проверки HeyGen-аватаров можно запускать отдельную задачу:
+
+```bash
+curl -X POST http://localhost:8000/projects/<project_id>/jobs/sync_avatar
+```
+
 Или короткий alias:
 
 ```bash
@@ -385,7 +391,7 @@ uvicorn app.main:app --reload
 Если HeyGen вернул готовый `video_url`, backend попытается скачать MP4 в `assets/avatar`. При наличии локального `avatar_video_path` финальный render использует avatar-video compositor: `avatar_fullscreen` идёт на весь экран, а `avatar_pip`, `screen_demo` и `cta` накладываются поверх PNG-визуала как PIP. Если MP4 ещё не готов, остаётся slideshow fallback.
 `HEYGEN_ENABLE_MOTION_PROMPT` по умолчанию выключен, потому что HeyGen принимает motion prompt не для всех avatar engine/avatar types.
 
-После первичной отправки можно вызывать `POST /projects/<project_id>/sync-avatar`: backend проверит статусы уже созданных HeyGen-задач и скачает готовые MP4, не создавая новые jobs. Если конкретная сцена неудачная или текст был изменён, `POST /projects/<project_id>/scenes/<scene_id>/retry-avatar` сбросит старый `avatar_video_id/status/url/path` и отправит в HeyGen только эту сцену.
+После первичной отправки можно вызывать `POST /projects/<project_id>/sync-avatar`: backend проверит статусы уже созданных HeyGen-задач и скачает готовые MP4, не создавая новые jobs. В production-режиме удобнее запускать это через очередь: `POST /projects/<project_id>/jobs/sync_avatar`. Если конкретная сцена неудачная или текст был изменён, `POST /projects/<project_id>/scenes/<scene_id>/retry-avatar` сбросит старый `avatar_video_id/status/url/path` и отправит в HeyGen только эту сцену.
 
 ## Реальные скриншоты сайтов
 

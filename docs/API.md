@@ -255,7 +255,7 @@ All HTTP errors keep the legacy `detail` field and also include a structured `er
 
 Returns a project readiness manifest for audit, UI checks, and publish preflight.
 
-The manifest includes project status, scene/source counts, scenes with visuals and audio, expected/ready/missing artifacts, per-artifact file existence and size, and readiness flags for script, sources, visuals, voice, render, export package, and final publish readiness.
+The manifest includes project status, scene/source counts, avatar video counts, scenes with visuals and audio, expected/ready/missing artifacts, per-artifact file existence and size, and readiness flags for script, sources, visuals, voice, avatars, render, export package, and final publish readiness.
 
 ```json
 {
@@ -267,6 +267,11 @@ The manifest includes project status, scene/source counts, scenes with visuals a
     "sources": 4,
     "scenes_with_visuals": 8,
     "scenes_with_audio": 8,
+    "avatar_scenes": 4,
+    "avatar_videos_submitted": 4,
+    "avatar_videos_ready_remote": 4,
+    "avatar_videos_downloaded": 4,
+    "avatar_videos_failed": 0,
     "expected_artifacts": 14,
     "ready_artifacts": 14,
     "missing_artifacts": 0
@@ -276,6 +281,7 @@ The manifest includes project status, scene/source counts, scenes with visuals a
     "sources": true,
     "visuals": true,
     "voice": true,
+    "avatars": true,
     "render": true,
     "export_package": true,
     "publish_ready": true
@@ -327,6 +333,7 @@ The manifest includes project status, scene/source counts, scenes with visuals a
       "generate_slides",
       "generate_voice",
       "prepare_avatar",
+      "sync_avatar",
       "render",
       "generate_all"
     ],
@@ -484,6 +491,7 @@ collect_sources
 generate_slides
 generate_voice
 prepare_avatar
+sync_avatar
 render
 generate_all
 ```
@@ -492,6 +500,12 @@ generate_all
 
 ```bash
 curl -X POST http://localhost:8000/projects/<project_id>/jobs/generate_all
+```
+
+Для фонового обновления HeyGen-статусов и скачивания готовых avatar MP4:
+
+```bash
+curl -X POST http://localhost:8000/projects/<project_id>/jobs/sync_avatar
 ```
 
 Ответ:

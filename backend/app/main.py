@@ -43,7 +43,7 @@ from app.models import (
     UserLogin,
 )
 from app.pipeline import VideoPipeline
-from app.services.avatar_service import AvatarService
+from app.services.avatar_service import AVATAR_SCENE_TYPES, READY_STATUSES, AvatarService
 from app.services.auth_service import (
     AuthService,
     InvalidCredentialsError,
@@ -593,6 +593,7 @@ def _required_consents_for_job(project: Project, job_type: JobType) -> list[Cons
     if project.avatar_enabled and job_type in {
         JobType.generate_slides,
         JobType.prepare_avatar,
+        JobType.sync_avatar,
         JobType.render,
         JobType.generate_all,
     }:
@@ -828,6 +829,16 @@ def _project_manifest(project: Project) -> dict:
     captured_sources = sum(1 for source in project.sources if source.screenshot_path)
     has_render_output = bool(project.result.final_video_path and _artifact_entry("final_video_path", project.result.final_video_path)["exists"])
     has_export_package = bool(project.result.export_package_path and _artifact_entry("export_package_path", project.result.export_package_path)["exists"])
+    avatar_scenes = [scene for scene in project.scenes if scene.avatar_visible and scene.visual_type in AVATAR_SCENE_TYPES]
+    avatar_submitted = sum(1 for scene in avatar_scenes if scene.avatar_video_id)
+    avatar_ready_remote = sum(1 for scene in avatar_scenes if (scene.avatar_video_status or "").lower() in READY_STATUSES)
+    avatar_downloaded = sum(
+        1
+        for scene in avatar_scenes
+        if scene.avatar_video_path and _artifact_entry("avatar_video_path", scene.avatar_video_path)["exists"]
+    )
+    avatar_failed = sum(1 for scene in avatar_scenes if (scene.avatar_video_status or "").lower() == "failed")
+    avatars_ready = not project.avatar_enabled or not avatar_scenes or avatar_downloaded == len(avatar_scenes)
     return {
         "project_id": project.id,
         "topic": project.topic,
@@ -841,6 +852,11 @@ def _project_manifest(project: Project) -> dict:
             "scenes_with_visuals": scenes_with_visuals,
             "scenes_with_audio": scenes_with_audio,
             "sources_with_screenshots": captured_sources,
+            "avatar_scenes": len(avatar_scenes),
+            "avatar_videos_submitted": avatar_submitted,
+            "avatar_videos_ready_remote": avatar_ready_remote,
+            "avatar_videos_downloaded": avatar_downloaded,
+            "avatar_videos_failed": avatar_failed,
             "expected_artifacts": len(expected_artifacts),
             "ready_artifacts": len(ready_artifacts),
             "missing_artifacts": len(missing_artifacts),
@@ -850,9 +866,10 @@ def _project_manifest(project: Project) -> dict:
             "sources": bool(project.sources),
             "visuals": bool(project.scenes) and scenes_with_visuals == len(project.scenes),
             "voice": bool(project.scenes) and scenes_with_audio == len(project.scenes),
+            "avatars": avatars_ready,
             "render": has_render_output,
             "export_package": has_export_package,
-            "publish_ready": project.status == ProjectStatus.completed and has_render_output and has_export_package and not missing_artifacts,
+            "publish_ready": project.status == ProjectStatus.completed and avatars_ready and has_render_output and has_export_package and not missing_artifacts,
         },
         "artifacts": artifacts,
         "missing_artifacts": missing_artifacts,

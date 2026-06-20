@@ -20,6 +20,7 @@ export type JobType =
   | 'generate_slides'
   | 'generate_voice'
   | 'prepare_avatar'
+  | 'sync_avatar'
   | 'render'
   | 'generate_all';
 
@@ -69,6 +70,11 @@ export type ProjectManifest = {
     scenes_with_visuals: number;
     scenes_with_audio: number;
     sources_with_screenshots: number;
+    avatar_scenes: number;
+    avatar_videos_submitted: number;
+    avatar_videos_ready_remote: number;
+    avatar_videos_downloaded: number;
+    avatar_videos_failed: number;
     expected_artifacts: number;
     ready_artifacts: number;
     missing_artifacts: number;
@@ -78,6 +84,7 @@ export type ProjectManifest = {
     sources: boolean;
     visuals: boolean;
     voice: boolean;
+    avatars: boolean;
     render: boolean;
     export_package: boolean;
     publish_ready: boolean;

@@ -26,7 +26,6 @@ import {
   retryJob,
   setAccessToken,
   startProjectJob,
-  syncAvatar,
 } from './src/api';
 import { clearSessionToken, loadSessionToken, saveSessionToken } from './src/session';
 import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UsageOverview, UserPublic } from './src/types';
@@ -394,9 +393,10 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const updated = await syncAvatar(project.id);
-      await refreshActiveProject(updated);
-      selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? updated.scenes[0] ?? null);
+      const queuedJob = await startProjectJob(project.id, 'sync_avatar');
+      setJob(queuedJob);
+      setManifest(null);
+      await pollJob(project.id, queuedJob);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось обновить аватары');
     } finally {
@@ -688,6 +688,13 @@ export default function App() {
                 <Text>Артефакты: {manifest.counts.ready_artifacts}/{manifest.counts.expected_artifacts}</Text>
                 <Text>Визуалы: {manifest.counts.scenes_with_visuals}/{manifest.counts.scenes}</Text>
                 <Text>Голос: {manifest.counts.scenes_with_audio}/{manifest.counts.scenes}</Text>
+                <Text>Аватары: {manifest.counts.avatar_videos_downloaded}/{manifest.counts.avatar_scenes}</Text>
+                {manifest.counts.avatar_videos_failed > 0 ? (
+                  <Text style={styles.warning}>Ошибки аватаров: {manifest.counts.avatar_videos_failed}</Text>
+                ) : null}
+                {!manifest.readiness.avatars ? (
+                  <Text style={styles.warning}>Аватары ещё не готовы: запустите обновление или повторите сцену.</Text>
+                ) : null}
                 {manifest.missing_artifacts.length ? (
                   <Text style={styles.warning}>Не хватает: {manifest.missing_artifacts.join(', ')}</Text>
                 ) : null}

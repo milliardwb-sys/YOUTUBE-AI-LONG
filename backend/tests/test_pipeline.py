@@ -374,6 +374,66 @@ def test_sync_avatar_downloads_completed_heygen_videos(tmp_path, monkeypatch):
     assert all(scene.avatar_video_path and Path(scene.avatar_video_path).exists() for scene in avatar_scenes)
 
 
+def test_inline_job_runner_sync_avatar_job(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    settings = Settings(
+        **{
+            **make_settings(tmp_path).__dict__,
+            "heygen_api_key": "heygen-test-key",
+            "heygen_avatar_id": "avatar_test",
+            "heygen_voice_id": "voice_test",
+        }
+    )
+    store = ProjectStore(settings)
+    pipeline = make_pipeline(settings, store)
+    job_store = JobStore(settings)
+    runner = JobRunner(settings, pipeline, job_store)
+    project = store.create_project(
+        ProjectCreate(
+            topic="Фоновая синхронизация HeyGen avatar MP4",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def create_avatar_video(self, project, scene):
+            raise AssertionError("sync_avatar job must not create new HeyGen jobs")
+
+        def get_video(self, video_id):
+            return {"id": video_id, "status": "completed", "video_url": f"https://video.local/{video_id}.mp4"}
+
+        def download_video(self, video_url, output_path):
+            output_path.write_bytes(b"fake mp4")
+            return output_path
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+
+    project = pipeline.generate_script(project.id)
+    for scene in project.scenes:
+        if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}:
+            scene.avatar_video_id = f"vid_{scene.order:03d}"
+            scene.avatar_video_status = "queued"
+    store.save(project)
+
+    job = runner.start(project.id, JobType.sync_avatar)
+    saved_job = job_store.get(job.id)
+    result = store.get(project.id)
+    avatar_scenes = [scene for scene in result.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
+
+    assert saved_job.status == JobStatus.completed
+    assert saved_job.progress == 100
+    assert saved_job.current_step == "completed"
+    assert result.current_step == "avatar_synced"
+    assert avatar_scenes
+    assert all(scene.avatar_video_path and Path(scene.avatar_video_path).exists() for scene in avatar_scenes)
+
+
 def test_retry_avatar_scene_resets_old_job_and_resubmits_one_scene(tmp_path, monkeypatch):
     from app.services import avatar_service as avatar_service_module
 
@@ -2058,6 +2118,49 @@ def test_api_project_manifest_reports_readiness_and_missing_artifacts(tmp_path, 
     assert payload["missing_artifacts"] == ["final_video"]
     assert payload["artifacts"][0]["key"] == "final_video"
     assert payload["artifacts"][0]["exists"] is False
+
+
+def test_api_project_manifest_reports_avatar_readiness(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/projects",
+        json={
+            "topic": "AI-аватар проверяет готовность HeyGen MP4",
+            "style": "ai_news_avatar",
+            "avatar_enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    project_id = created.json()["id"]
+    project = main.pipeline.generate_script(project_id)
+    avatar_dir = main.store.project_dir(project_id) / "assets" / "avatar"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    avatar_scenes = [scene for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
+    for scene in avatar_scenes:
+        avatar_path = avatar_dir / f"scene_{scene.order:03d}_heygen.mp4"
+        avatar_path.write_bytes(b"fake mp4")
+        scene.avatar_video_id = f"vid_{scene.order:03d}"
+        scene.avatar_video_status = "completed"
+        scene.avatar_video_url = f"https://video.local/{scene.order:03d}.mp4"
+        scene.avatar_video_path = str(avatar_path)
+    main.store.save(project)
+
+    response = client.get(f"/projects/{project_id}/manifest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["counts"]["avatar_scenes"] == len(avatar_scenes)
+    assert payload["counts"]["avatar_videos_submitted"] == len(avatar_scenes)
+    assert payload["counts"]["avatar_videos_ready_remote"] == len(avatar_scenes)
+    assert payload["counts"]["avatar_videos_downloaded"] == len(avatar_scenes)
+    assert payload["counts"]["avatar_videos_failed"] == 0
+    assert payload["readiness"]["avatars"] is True
 
 
 def test_maintenance_backup_and_restore_preview(tmp_path, monkeypatch):

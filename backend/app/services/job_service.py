@@ -306,6 +306,7 @@ class JobRunner:
             JobType.generate_slides: ("generate_slides", 90, self.pipeline.generate_slides),
             JobType.generate_voice: ("generate_voice", 90, self.pipeline.generate_voice),
             JobType.prepare_avatar: ("prepare_avatar", 90, self.pipeline.prepare_avatar),
+            JobType.sync_avatar: ("sync_avatar", 90, self.pipeline.sync_avatar),
             JobType.render: ("render", 90, self.pipeline.render),
         }
         step = steps.get(job.type)
@@ -325,6 +326,7 @@ class JobRunner:
             ("generate_voice", 48, self.pipeline.generate_voice),
             ("generate_slides", 66, self.pipeline.generate_slides),
             ("prepare_avatar", 78, self.pipeline.prepare_avatar),
+            ("sync_avatar", 84, self.pipeline.sync_avatar),
             ("render", 95, self.pipeline.render),
         ]
         for name, progress, fn in workflow:
