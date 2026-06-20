@@ -670,6 +670,18 @@ HEYGEN_API_KEY + HEYGEN_AVATAR_ID заданы → POST /v3/videos для avatar
 Для сцен `avatar_fullscreen`, `avatar_pip`, `screen_demo` и `cta` backend сохраняет `avatar_video_id`, `avatar_video_status`, `avatar_video_url` и, если доступен готовый файл, `avatar_video_path`. Если у сцены есть локальный `avatar_video_path`, `render` использует avatar-video compositor: fullscreen-сцены берут видео аватара как основной кадр, PIP/screen/CTA-сцены накладывают видео поверх PNG-визуала.
 `HEYGEN_ENABLE_MOTION_PROMPT=false` по умолчанию: motion prompt включается вручную, потому что HeyGen поддерживает его не для всех avatar engine/avatar types.
 
+### POST /projects/{id}/sync-avatar
+
+Проверяет статусы уже созданных HeyGen-задач, обновляет `avatar_video_status/avatar_video_url` и скачивает готовые MP4 в `assets/avatar`.
+
+Важно: endpoint не создаёт новые HeyGen-задачи для сцен без `avatar_video_id`. Для первичной отправки используйте `prepare-avatar`, для повторной генерации одной сцены — `retry-avatar`.
+
+### POST /projects/{id}/scenes/{scene_id}/retry-avatar
+
+Сбрасывает у выбранной avatar-сцены старые `avatar_video_id`, `avatar_video_status`, `avatar_video_url`, `avatar_video_path` и отправляет в HeyGen только эту сцену.
+
+Если сцена не относится к `avatar_fullscreen`, `avatar_pip`, `screen_demo` или `cta`, API вернёт `409`.
+
 ### POST /projects/{id}/render
 
 Собирает `final.mp4` через FFmpeg и создаёт export package. Если локальные avatar MP4 отсутствуют, используется обычный slideshow render. Если есть `avatar_video_path`, backend рендерит per-scene segments и собирает avatar composite video.

@@ -205,6 +205,24 @@ export async function generateAll(projectId: string): Promise<Project> {
   return response.json();
 }
 
+export async function syncAvatar(projectId: string): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/sync-avatar`, {
+    method: 'POST',
+    headers: headers(),
+  });
+  await assertOk(response, 'Обновление аватаров');
+  return response.json();
+}
+
+export async function retrySceneAvatar(projectId: string, sceneId: string): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/projects/${projectId}/scenes/${sceneId}/retry-avatar`, {
+    method: 'POST',
+    headers: headers(),
+  });
+  await assertOk(response, 'Повтор аватара сцены');
+  return response.json();
+}
+
 export async function startProjectJob(projectId: string, jobType: JobType = 'generate_all'): Promise<ProjectJob> {
   const response = await fetch(`${API_BASE_URL}/projects/${projectId}/jobs/${jobType}`, {
     method: 'POST',

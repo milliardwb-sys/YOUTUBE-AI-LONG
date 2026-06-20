@@ -153,12 +153,15 @@ class ProjectStore:
         changes = payload.model_dump(exclude_unset=True)
         clear_visual = False
         clear_audio = False
+        clear_avatar = False
         for key, value in changes.items():
             setattr(scene, key, value)
             if key in {"title", "goal", "on_screen_text", "visual_type", "source_id", "visual_prompt"}:
                 clear_visual = True
             if key in {"narration", "duration_sec"}:
                 clear_audio = True
+            if key in {"narration", "duration_sec", "visual_type", "avatar_visible"}:
+                clear_avatar = True
         if clear_visual:
             scene.visual_path = None
             self._clear_render_outputs(project)
@@ -167,6 +170,10 @@ class ProjectStore:
             project.result.subtitles_path = None
             project.result.captions_vtt_path = None
             project.result.voice_manifest_path = None
+            self._clear_render_outputs(project)
+        if clear_avatar:
+            self._clear_scene_avatar(scene)
+            project.result.avatar_manifest_path = None
             self._clear_render_outputs(project)
         self._sync_scene_source(project, scene_id)
         self._recalculate_scene_timings(project)
@@ -200,6 +207,7 @@ class ProjectStore:
         project.scenes.sort(key=lambda item: item.order)
         self._sync_scene_source(project, scene.id)
         self._normalize_scene_order(project)
+        project.result.avatar_manifest_path = None
         self._clear_render_outputs(project)
         project.status = ProjectStatus.draft
         project.error = None
@@ -215,6 +223,7 @@ class ProjectStore:
         if len(project.scenes) == before:
             raise SceneNotFoundError(scene_id)
         self._normalize_scene_order(project)
+        project.result.avatar_manifest_path = None
         self._clear_render_outputs(project)
         project.status = ProjectStatus.draft
         project.error = None
@@ -233,6 +242,8 @@ class ProjectStore:
         by_id = {scene.id: scene for scene in project.scenes}
         project.scenes = [by_id[scene_id] for scene_id in payload.scene_ids]
         self._normalize_scene_order(project)
+        project.result.avatar_manifest_path = None
+        self._clear_render_outputs(project)
         project.status = ProjectStatus.draft
         project.error = None
         project.touch("scenes_reordered")
@@ -383,3 +394,9 @@ class ProjectStore:
         project.result.quality_report_path = None
         project.result.render_manifest_path = None
         project.result.export_package_path = None
+
+    def _clear_scene_avatar(self, scene: Scene) -> None:
+        scene.avatar_video_id = None
+        scene.avatar_video_status = None
+        scene.avatar_video_url = None
+        scene.avatar_video_path = None

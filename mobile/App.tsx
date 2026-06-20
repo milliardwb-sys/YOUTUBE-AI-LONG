@@ -22,9 +22,11 @@ import {
   registerUser,
   regenerateSceneSlide,
   reorderScenes,
+  retrySceneAvatar,
   retryJob,
   setAccessToken,
   startProjectJob,
+  syncAvatar,
 } from './src/api';
 import { clearSessionToken, loadSessionToken, saveSessionToken } from './src/session';
 import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UsageOverview, UserPublic } from './src/types';
@@ -387,6 +389,36 @@ export default function App() {
     }
   }
 
+  async function handleSyncAvatar() {
+    if (!project) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await syncAvatar(project.id);
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? updated.scenes[0] ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось обновить аватары');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRetrySceneAvatar() {
+    if (!project || !selectedSceneId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await retrySceneAvatar(project.id, selectedSceneId);
+      await refreshActiveProject(updated);
+      selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось повторить аватар сцены');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleMoveScene(direction: -1 | 1) {
     if (!project || !selectedSceneId) return;
     const currentIndex = project.scenes.findIndex((scene) => scene.id === selectedSceneId);
@@ -640,6 +672,10 @@ export default function App() {
               <View style={styles.buttonRow}>
                 <Button title="Удалить" onPress={handleDeleteScene} disabled={loading || !selectedScene} />
                 <Button title="Пересобрать кадр" onPress={handleRegenerateSceneSlide} disabled={loading || !selectedScene} />
+              </View>
+              <View style={styles.buttonRow}>
+                <Button title="Обновить аватары" onPress={handleSyncAvatar} disabled={loading || !project} />
+                <Button title="Повторить аватар" onPress={handleRetrySceneAvatar} disabled={loading || !selectedScene} />
               </View>
               <View style={styles.buttonRow}>
                 <Button title="Выше" onPress={() => handleMoveScene(-1)} disabled={loading || !canMoveSceneUp} />

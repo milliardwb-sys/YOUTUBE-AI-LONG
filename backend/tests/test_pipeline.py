@@ -318,6 +318,117 @@ def test_prepare_avatar_submits_heygen_jobs_when_configured(tmp_path, monkeypatc
     assert manifest["configured"] is True
 
 
+def test_sync_avatar_downloads_completed_heygen_videos(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    settings = Settings(
+        **{
+            **make_settings(tmp_path).__dict__,
+            "heygen_api_key": "heygen-test-key",
+            "heygen_avatar_id": "avatar_test",
+            "heygen_voice_id": "voice_test",
+        }
+    )
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="AI-ведущий ждёт готовые HeyGen-ассеты",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def create_avatar_video(self, project, scene):
+            raise AssertionError("sync must not submit new HeyGen jobs")
+
+        def get_video(self, video_id):
+            return {"id": video_id, "status": "completed", "video_url": f"https://video.local/{video_id}.mp4"}
+
+        def download_video(self, video_url, output_path):
+            output_path.write_bytes(f"fake mp4 from {video_url}".encode("utf-8"))
+            return output_path
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+
+    project = pipeline.generate_script(project.id)
+    for scene in project.scenes:
+        if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}:
+            scene.avatar_video_id = f"vid_{scene.order:03d}"
+            scene.avatar_video_status = "queued"
+    store.save(project)
+
+    result = pipeline.sync_avatar(project.id)
+    manifest = json.loads(Path(result.result.avatar_manifest_path).read_text(encoding="utf-8"))
+    avatar_scenes = [scene for scene in result.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
+
+    assert manifest["mode"] == "sync"
+    assert manifest["status"] == "ready"
+    assert avatar_scenes
+    assert all(scene.avatar_video_status == "completed" for scene in avatar_scenes)
+    assert all(scene.avatar_video_path and Path(scene.avatar_video_path).exists() for scene in avatar_scenes)
+
+
+def test_retry_avatar_scene_resets_old_job_and_resubmits_one_scene(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    settings = Settings(
+        **{
+            **make_settings(tmp_path).__dict__,
+            "heygen_api_key": "heygen-test-key",
+            "heygen_avatar_id": "avatar_test",
+            "heygen_voice_id": "voice_test",
+        }
+    )
+    store = ProjectStore(settings)
+    project = store.create_project(
+        ProjectCreate(
+            topic="Повторная генерация одной avatar-сцены",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    pipeline = make_pipeline(settings, store)
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def create_avatar_video(self, project, scene):
+            return {"video_id": f"retry_{scene.order:03d}", "status": "queued", "output_format": "mp4"}
+
+        def get_video(self, video_id):
+            raise AssertionError("retry starts from a clean scene and must submit a new job")
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+
+    project = pipeline.generate_script(project.id)
+    target = next(scene for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"})
+    target.avatar_video_id = "old_video"
+    target.avatar_video_status = "failed"
+    target.avatar_video_url = "https://video.local/old.mp4"
+    target.avatar_video_path = str(store.project_dir(project.id) / "assets" / "avatar" / "old.mp4")
+    store.save(project)
+
+    result = pipeline.retry_avatar_scene(project.id, target.id)
+    updated_target = next(scene for scene in result.scenes if scene.id == target.id)
+    manifest = json.loads(Path(result.result.avatar_manifest_path).read_text(encoding="utf-8"))
+
+    assert manifest["mode"] == "retry"
+    assert manifest["scene_count"] == 1
+    assert manifest["scenes"][0]["scene_id"] == target.id
+    assert updated_target.avatar_video_id == f"retry_{updated_target.order:03d}"
+    assert updated_target.avatar_video_status == "queued"
+    assert updated_target.avatar_video_url is None
+    assert updated_target.avatar_video_path is None
+
+
 def test_source_service_uses_search_provider_results(tmp_path):
     from app.services.search_provider import SearchResult
 

@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.config import LOCAL_ENVS, get_settings
+from app.errors import PipelinePreconditionError
 from app.models import (
     BillingCheckoutCreate,
     ConsentCreate,
@@ -1929,6 +1930,13 @@ def prepare_avatar(project_id: str, request: Request) -> dict:
     return _sync_pipeline_response(pipeline.prepare_avatar(project_id))
 
 
+@app.post("/projects/{project_id}/sync-avatar")
+def sync_avatar(project_id: str, request: Request) -> dict:
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.prepare_avatar)
+    return _sync_pipeline_response(pipeline.sync_avatar(project_id))
+
+
 @app.post("/projects/{project_id}/render")
 def render(project_id: str, request: Request) -> dict:
     project = _get_project_or_404(project_id, request, permission="write")
@@ -2117,6 +2125,18 @@ def regenerate_scene_slide(project_id: str, scene_id: str, request: Request) -> 
         return _sync_pipeline_response(pipeline.regenerate_scene_slide(project_id, scene_id))
     except SceneNotFoundError:
         raise HTTPException(status_code=404, detail="Scene not found") from None
+
+
+@app.post("/projects/{project_id}/scenes/{scene_id}/retry-avatar")
+def retry_scene_avatar(project_id: str, scene_id: str, request: Request) -> dict:
+    project = _get_project_or_404(project_id, request, permission="write")
+    _enforce_project_consents(project, _current_user(request), JobType.prepare_avatar)
+    try:
+        return _sync_pipeline_response(pipeline.retry_avatar_scene(project_id, scene_id))
+    except SceneNotFoundError:
+        raise HTTPException(status_code=404, detail="Scene not found") from None
+    except PipelinePreconditionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @app.get("/files/{file_path:path}")

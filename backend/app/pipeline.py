@@ -67,6 +67,21 @@ class VideoPipeline:
         project_dir = self.store.project_dir(project_id)
         return self._guarded(project, lambda p: self.avatar.prepare_avatar_overlay(p, project_dir))
 
+    def sync_avatar(self, project_id: str) -> Project:
+        project = self.store.get(project_id)
+        project_dir = self.store.project_dir(project_id)
+        return self._guarded(project, lambda p: self.avatar.sync_avatar_statuses(p, project_dir))
+
+    def retry_avatar_scene(self, project_id: str, scene_id: str) -> Project:
+        project = self.store.get(project_id)
+        scene = next((item for item in project.scenes if item.id == scene_id), None)
+        if scene is None:
+            raise SceneNotFoundError(scene_id)
+        if not self.avatar.needs_avatar(scene):
+            raise PipelinePreconditionError("Scene is not configured for avatar generation")
+        project_dir = self.store.project_dir(project_id)
+        return self._guarded(project, lambda p: self.avatar.retry_avatar_scene(p, project_dir, scene_id))
+
     def render(self, project_id: str) -> Project:
         project = self.store.get(project_id)
         project_dir = self.store.project_dir(project_id)
