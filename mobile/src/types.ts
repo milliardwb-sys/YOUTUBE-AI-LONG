@@ -154,7 +154,9 @@ export type SceneCreate = {
   duration_sec: number;
   visual_type?: Scene['visual_type'];
   avatar_visible?: boolean;
+  source_id?: string | null;
   visual_prompt?: string | null;
+  notes?: string | null;
 };
 
 export type Project = {

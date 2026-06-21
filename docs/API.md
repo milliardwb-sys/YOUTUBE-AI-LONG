@@ -776,13 +776,14 @@ render
   "visual_type": "screen_demo",
   "duration_sec": 20,
   "avatar_visible": true,
+  "source_id": "source_...",
   "visual_prompt": "neon SaaS explainer slide with huge readable title"
 }
 ```
 
 После смены длительности backend пересчитывает `start_sec` для следующих сцен. Если меняется визуальная часть, `visual_path` очищается. Если меняется narration/duration, `audio_path` и subtitle paths очищаются.
 
-Мобильный клиент использует этот endpoint для управления `visual_type`, `avatar_visible` и готовностью сцены: кадр, голос, avatar MP4. Отдельные этапы проекта можно запускать через `POST /projects/{id}/jobs/{job_type}` без полного `generate_all`.
+Мобильный клиент использует этот endpoint для управления `visual_type`, `source_id`, `visual_prompt`, `avatar_visible` и готовностью сцены: кадр, голос, avatar MP4. Отдельные этапы проекта можно запускать через `POST /projects/{id}/jobs/{job_type}` без полного `generate_all`.
 
 ### POST /projects/{id}/scenes
 
@@ -795,6 +796,8 @@ render
   "narration": "Текст озвучки для новой сцены.",
   "duration_sec": 12,
   "visual_type": "diagram",
+  "source_id": "source_...",
+  "visual_prompt": "clean product UI screenshot with readable Russian labels",
   "order": 2
 }
 ```

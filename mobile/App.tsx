@@ -94,6 +94,8 @@ export default function App() {
   const [sceneDuration, setSceneDuration] = useState('12');
   const [sceneVisualType, setSceneVisualType] = useState<Scene['visual_type']>('ai_slide');
   const [sceneAvatarVisible, setSceneAvatarVisible] = useState(true);
+  const [sceneSourceId, setSceneSourceId] = useState<string | null>(null);
+  const [sceneVisualPrompt, setSceneVisualPrompt] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -231,6 +233,8 @@ export default function App() {
     setSceneDuration(String(scene?.duration_sec ?? 12));
     setSceneVisualType(scene?.visual_type ?? 'ai_slide');
     setSceneAvatarVisible(scene?.avatar_visible ?? true);
+    setSceneSourceId(scene?.source_id ?? null);
+    setSceneVisualPrompt(scene?.visual_prompt ?? '');
   }
 
   async function handleOpenProject(projectId: string) {
@@ -388,6 +392,8 @@ export default function App() {
         duration_sec: duration,
         visual_type: sceneVisualType,
         avatar_visible: sceneAvatarVisible,
+        source_id: sceneSourceId,
+        visual_prompt: sceneVisualPrompt.trim() || null,
       });
       await refreshActiveProject(updated);
       selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
@@ -409,6 +415,8 @@ export default function App() {
         duration_sec: Math.max(5, Math.min(240, Number.parseInt(sceneDuration, 10) || 12)),
         visual_type: sceneVisualType,
         avatar_visible: sceneAvatarVisible,
+        source_id: sceneSourceId,
+        visual_prompt: sceneVisualPrompt.trim() || null,
       });
       await refreshActiveProject(updated);
       selectScene(updated.scenes[updated.scenes.length - 1] ?? null);
@@ -506,6 +514,8 @@ export default function App() {
   const canRetry = job?.status === 'failed' || job?.status === 'cancelled';
   const selectedScene = project?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null;
   const selectedSceneIndex = project?.scenes?.findIndex((scene) => scene.id === selectedSceneId) ?? -1;
+  const sourceOptions = project?.sources?.slice(0, 8) ?? [];
+  const selectedFormSourceName = sourceOptions.find((source) => source.id === sceneSourceId)?.name ?? selectedScene?.source_name ?? null;
   const canMoveSceneUp = selectedSceneIndex > 0;
   const canMoveSceneDown = Boolean(project?.scenes && selectedSceneIndex >= 0 && selectedSceneIndex < project.scenes.length - 1);
 
@@ -749,6 +759,42 @@ export default function App() {
                   );
                 })}
               </View>
+              <Text style={styles.formLabel}>Источник сцены</Text>
+              <View style={styles.segmentGrid}>
+                <Pressable
+                  onPress={() => setSceneSourceId(null)}
+                  style={[styles.segmentButton, styles.sourceSegmentButton, sceneSourceId === null ? styles.segmentButtonActive : null]}
+                  disabled={loading}
+                >
+                  <Text style={[styles.segmentText, sceneSourceId === null ? styles.segmentTextActive : null]}>Без источника</Text>
+                </Pressable>
+                {sourceOptions.map((source) => {
+                  const active = source.id === sceneSourceId;
+                  return (
+                    <Pressable
+                      key={source.id}
+                      onPress={() => setSceneSourceId(source.id)}
+                      style={[styles.segmentButton, styles.sourceSegmentButton, active ? styles.segmentButtonActive : null]}
+                      disabled={loading}
+                    >
+                      <Text numberOfLines={2} style={[styles.segmentText, active ? styles.segmentTextActive : null]}>
+                        {source.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {sourceOptions.length ? null : (
+                <Text style={styles.helperText}>Источники появятся после этапа «Источники».</Text>
+              )}
+              <Text style={styles.formLabel}>Промпт визуала</Text>
+              <TextInput
+                value={sceneVisualPrompt}
+                onChangeText={setSceneVisualPrompt}
+                multiline
+                style={[styles.compactInput, styles.scenePromptInput]}
+                placeholder="что показать: сайт, интерфейс, скрин, AI-b-roll или титр"
+              />
               <View style={styles.inlineSwitch}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.inlineSwitchTitle}>Аватар в сцене</Text>
@@ -760,7 +806,10 @@ export default function App() {
                 <View style={styles.sceneReadinessBox}>
                   <Text style={styles.sceneReadinessTitle}>Готовность выбранной сцены</Text>
                   <Text style={styles.sceneReadinessText}>{sceneAssetStatus(selectedScene)}</Text>
-                  {selectedScene.source_name ? <Text style={styles.sceneReadinessText}>Источник: {selectedScene.source_name}</Text> : null}
+                  <Text style={styles.sceneReadinessText}>Источник: {selectedFormSourceName ?? 'не выбран'}</Text>
+                  <Text style={styles.sceneReadinessText}>
+                    Промпт: {(selectedScene.visual_prompt ?? sceneVisualPrompt).trim().length ? 'задан' : 'не задан'}
+                  </Text>
                 </View>
               ) : null}
               <View style={styles.buttonRow}>
@@ -822,6 +871,9 @@ export default function App() {
                   #{scene.order} {scene.title} · {scene.visual_type}
                 </Text>
                 <Text style={styles.sceneReadinessText}>{sceneAssetStatus(scene)}</Text>
+                <Text style={styles.sceneReadinessText}>
+                  Источник: {scene.source_name ?? 'не выбран'} · Промпт: {scene.visual_prompt ? 'есть' : 'нет'}
+                </Text>
               </View>
             ))}
             {project.sources?.slice(0, 4).map((source) => (
@@ -898,6 +950,7 @@ const styles = StyleSheet.create({
   usageMeta: { color: '#d9f99d', fontSize: 12 },
   label: { color: 'white', fontWeight: '700', marginTop: 16 },
   formLabel: { color: '#334155', fontWeight: '800', marginTop: 4 },
+  helperText: { color: '#64748b', fontSize: 12 },
   input: {
     minHeight: 110,
     backgroundColor: 'white',
@@ -931,6 +984,7 @@ const styles = StyleSheet.create({
   scenePickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   scenePickerText: { color: '#334155', flex: 1 },
   sceneNarrationInput: { minHeight: 90, textAlignVertical: 'top' },
+  scenePromptInput: { minHeight: 74, textAlignVertical: 'top' },
   segmentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   segmentButton: {
     borderWidth: 1,
@@ -940,6 +994,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: '#f8fafc',
   },
+  sourceSegmentButton: { minWidth: 126, flexGrow: 1, flexBasis: '46%' },
   segmentButtonActive: { backgroundColor: '#111827', borderColor: '#111827' },
   segmentText: { color: '#334155', fontWeight: '800', fontSize: 12 },
   segmentTextActive: { color: 'white' },
