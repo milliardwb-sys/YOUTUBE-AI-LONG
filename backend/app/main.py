@@ -1330,6 +1330,7 @@ def _apply_heygen_webhook_event(request: Request, event_type: str, video_id: str
         store.save(updated)
     except Exception as exc:  # noqa: BLE001 - webhook should report provider/update errors clearly
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    render_job = job_runner.queue_render_after_avatar_ready(updated)
     _audit(
         request,
         "heygen.webhook",
@@ -1340,6 +1341,7 @@ def _apply_heygen_webhook_event(request: Request, event_type: str, video_id: str
             "event_type": event_type,
             "video_id": video_id,
             "status": details.get("status"),
+            "render_job_id": render_job.id if render_job else None,
         },
     )
     return {
@@ -1347,6 +1349,8 @@ def _apply_heygen_webhook_event(request: Request, event_type: str, video_id: str
         "project_id": updated.id,
         "video_id": video_id,
         "status": details.get("status"),
+        "render_queued": render_job is not None,
+        "render_job_id": render_job.id if render_job else None,
     }
 
 

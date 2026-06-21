@@ -243,6 +243,15 @@ class JobRunner:
             queued.append(self.start(project.id, JobType.sync_avatar, owner_id=project.owner_id))
         return queued
 
+    def queue_render_after_avatar_ready(self, project) -> ProjectJob | None:
+        if not self.settings.avatar_auto_render_after_sync:
+            return None
+        if self.job_store.active_for_project(project.id):
+            return None
+        if not self._should_auto_render_after_avatar_sync(project):
+            return None
+        return self.start(project.id, JobType.render, owner_id=project.owner_id)
+
     def cancel(self, job_id: str) -> ProjectJob:
         job = self.job_store.cancel(job_id)
         try:

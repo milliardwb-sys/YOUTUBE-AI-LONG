@@ -654,6 +654,83 @@ def test_heygen_webhook_rejects_invalid_signature(tmp_path, monkeypatch):
     assert response.status_code == 401
 
 
+def test_heygen_webhook_queues_render_when_project_ready(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    secret = "webhook-secret"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("HEYGEN_API_KEY", "heygen-test-key")
+    monkeypatch.setenv("HEYGEN_AVATAR_ID", "avatar_test")
+    monkeypatch.setenv("HEYGEN_WEBHOOK_SECRET", secret)
+    monkeypatch.setenv("RUN_JOBS_INLINE", "false")
+    monkeypatch.setenv("EXECUTE_JOBS_IN_API", "false")
+    monkeypatch.setenv("AVATAR_AUTO_RENDER_AFTER_SYNC", "true")
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download_video(self, video_url, output_path):
+            output_path.write_bytes(b"ready avatar")
+            return output_path
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+    client = TestClient(main.app)
+    project = main.store.create_project(
+        ProjectCreate(
+            topic="HeyGen webhook ставит render после готовности",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    project = main.pipeline.generate_script(project.id)
+    project = main.pipeline.generate_slides(project.id)
+    project = main.pipeline.generate_voice(project.id)
+    avatar_dir = main.store.project_dir(project.id) / "assets" / "avatar"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    avatar_scenes = [scene for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}]
+    target = avatar_scenes[-1]
+    for scene in avatar_scenes:
+        scene.avatar_video_id = f"video_{scene.order:03d}"
+        scene.avatar_video_status = "completed"
+        if scene.id != target.id:
+            avatar_path = avatar_dir / f"scene_{scene.order:03d}_heygen.mp4"
+            avatar_path.write_bytes(b"ready avatar")
+            scene.avatar_video_path = str(avatar_path)
+    main.store.save(project)
+
+    payload = {
+        "event_type": "video.completed",
+        "event_data": {"video_id": target.avatar_video_id, "video_url": "https://video.local/final-avatar.mp4"},
+    }
+    raw_body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    response = client.post(
+        "/webhooks/heygen",
+        content=raw_body,
+        headers={
+            "content-type": "application/json",
+            "Heygen-Signature": hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest(),
+            "Heygen-Timestamp": str(int(time.time())),
+            "Heygen-Event-Id": "evt_render_ready_123",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["render_queued"] is True
+    assert payload["render_job_id"]
+    render_job = main.job_store.get(payload["render_job_id"])
+    assert render_job.type == JobType.render
+    assert render_job.status == JobStatus.queued
+    assert any(event["event"] == "queued_for_external_worker" for event in render_job.events)
+    assert main.store.get(project.id).current_step == "queued_render"
+
+
 def test_retry_avatar_scene_resets_old_job_and_resubmits_one_scene(tmp_path, monkeypatch):
     from app.services import avatar_service as avatar_service_module
 

@@ -713,7 +713,7 @@ Heygen-Timestamp: <unix_timestamp>
 Heygen-Event-Id: <event_id>
 ```
 
-Backend принимает события `video.completed`/`video.failed` и совместимые `avatar_video.success`/`avatar_video.fail`, ищет сцену по `event_data.video_id`, обновляет `avatar_video_status/avatar_video_url/avatar_video_path` и переписывает `avatar_manifest.json`. Повторный `Heygen-Event-Id` возвращает `duplicate: true`.
+Backend принимает события `video.completed`/`video.failed` и совместимые `avatar_video.success`/`avatar_video.fail`, ищет сцену по `event_data.video_id`, обновляет `avatar_video_status/avatar_video_url/avatar_video_path` и переписывает `avatar_manifest.json`. Если все avatar MP4, визуалы и аудио готовы, `AVATAR_AUTO_RENDER_AFTER_SYNC=true` ставит `render` в очередь и возвращает `render_queued: true`. Повторный `Heygen-Event-Id` возвращает `duplicate: true`.
 
 ### POST /projects/{id}/render
 

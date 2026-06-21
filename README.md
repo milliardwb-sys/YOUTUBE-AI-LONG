@@ -412,7 +412,7 @@ Worker сам найдёт проекты, где уже есть HeyGen `avatar
 POST /webhooks/heygen
 ```
 
-Он принимает события `video.completed`/`video.failed` и совместимые `avatar_video.success`/`avatar_video.fail`, проверяет `Heygen-Signature` через `HEYGEN_WEBHOOK_SECRET`, обновляет сцену по `video_id`, скачивает готовый MP4 и переписывает `avatar_manifest.json`. Повторный `Heygen-Event-Id` обрабатывается идемпотентно.
+Он принимает события `video.completed`/`video.failed` и совместимые `avatar_video.success`/`avatar_video.fail`, проверяет `Heygen-Signature` через `HEYGEN_WEBHOOK_SECRET`, обновляет сцену по `video_id`, скачивает готовый MP4 и переписывает `avatar_manifest.json`. Если после события готовы все avatar MP4, визуалы и аудио, `AVATAR_AUTO_RENDER_AFTER_SYNC=true` поставит `render` в очередь. Повторный `Heygen-Event-Id` обрабатывается идемпотентно.
 
 ## Реальные скриншоты сайтов
 
