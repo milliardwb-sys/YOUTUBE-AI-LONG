@@ -37,6 +37,27 @@ class AvatarService:
     def needs_avatar(self, scene: Scene) -> bool:
         return scene.avatar_visible and scene.visual_type in AVATAR_SCENE_TYPES
 
+    def apply_webhook_update(self, project: Project, project_dir: Path, video_id: str, details: dict) -> Project:
+        avatar_dir = ensure_dir(project_dir / "assets" / "avatar")
+        scene = next((item for item in project.scenes if item.avatar_video_id == video_id), None)
+        if scene is None:
+            raise ValueError(f"Avatar video {video_id} is not attached to this project")
+        provider = HeyGenAvatarProvider(self.settings)
+        self._apply_heygen_details(provider, scene, {"video_id": video_id, **details}, avatar_dir)
+        scenes = [item for item in project.scenes if self.needs_avatar(item)]
+        manifest = {
+            "provider": "heygen",
+            "configured": bool(self.settings.heygen_api_key and self.settings.heygen_avatar_id),
+            "project_id": project.id,
+            "mode": "webhook",
+            "scene_count": len(scenes),
+            "status": self._rollup_status([self._scene_manifest(item, status=self._scene_status(item)) for item in scenes]),
+            "scenes": [self._scene_manifest(item, status=self._scene_status(item)) for item in scenes],
+        }
+        self._write_manifest(project, avatar_dir, manifest)
+        project.touch("avatar_webhook_synced")
+        return project
+
     def _process_avatar_scenes(
         self,
         project: Project,

@@ -385,6 +385,8 @@ export HEYGEN_OUTPUT_FORMAT=mp4
 export HEYGEN_REMOVE_BACKGROUND=true
 export HEYGEN_ENABLE_MOTION_PROMPT=false
 export HEYGEN_POLL_SECONDS=0
+export HEYGEN_WEBHOOK_SECRET="..."
+export HEYGEN_WEBHOOK_TOLERANCE_SECONDS=300
 export AVATAR_AUTO_SYNC_ENABLED=true
 export AVATAR_AUTO_SYNC_INTERVAL_SECONDS=60
 export AVATAR_AUTO_RENDER_AFTER_SYNC=true
@@ -403,6 +405,14 @@ python backend/job_worker.py --auto-avatar-sync --poll-interval 10 --limit 2
 ```
 
 Worker сам найдёт проекты, где уже есть HeyGen `avatar_video_id`, но локальный MP4 ещё не скачан, и поставит `sync_avatar` с backoff `AVATAR_AUTO_SYNC_INTERVAL_SECONDS`. Если после sync все avatar MP4, визуалы и аудио готовы, а финальный MP4 ещё не собран, `AVATAR_AUTO_RENDER_AFTER_SYNC=true` автоматически запустит render.
+
+Также доступен webhook endpoint:
+
+```text
+POST /webhooks/heygen
+```
+
+Он принимает события `video.completed`/`video.failed` и совместимые `avatar_video.success`/`avatar_video.fail`, проверяет `Heygen-Signature` через `HEYGEN_WEBHOOK_SECRET`, обновляет сцену по `video_id`, скачивает готовый MP4 и переписывает `avatar_manifest.json`. Повторный `Heygen-Event-Id` обрабатывается идемпотентно.
 
 ## Реальные скриншоты сайтов
 

@@ -53,6 +53,8 @@ class Settings:
     heygen_remove_background: bool
     heygen_enable_motion_prompt: bool
     heygen_poll_seconds: int
+    heygen_webhook_secret: str | None
+    heygen_webhook_tolerance_seconds: int
     avatar_auto_sync_enabled: bool
     avatar_auto_sync_interval_seconds: int
     avatar_auto_render_after_sync: bool
@@ -199,6 +201,8 @@ def get_settings() -> Settings:
         heygen_remove_background=_env_bool("HEYGEN_REMOVE_BACKGROUND", True),
         heygen_enable_motion_prompt=_env_bool("HEYGEN_ENABLE_MOTION_PROMPT", False),
         heygen_poll_seconds=max(0, _env_int("HEYGEN_POLL_SECONDS", 0)),
+        heygen_webhook_secret=_env_optional("HEYGEN_WEBHOOK_SECRET"),
+        heygen_webhook_tolerance_seconds=max(30, _env_int("HEYGEN_WEBHOOK_TOLERANCE_SECONDS", 300)),
         avatar_auto_sync_enabled=_env_bool("AVATAR_AUTO_SYNC_ENABLED", False),
         avatar_auto_sync_interval_seconds=max(15, _env_int("AVATAR_AUTO_SYNC_INTERVAL_SECONDS", 60)),
         avatar_auto_render_after_sync=_env_bool("AVATAR_AUTO_RENDER_AFTER_SYNC", True),

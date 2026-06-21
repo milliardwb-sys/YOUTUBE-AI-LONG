@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import time
@@ -220,6 +222,7 @@ async def api_key_middleware(request: Request, call_next):
         "/auth/register",
         "/auth/login",
         "/billing/stripe/webhook",
+        "/webhooks/heygen",
     }
     is_docs_path = request.url.path in {"/docs", "/redoc"} or request.url.path.startswith("/docs/")
     is_public_path = request.url.path in public_paths or is_docs_path
@@ -1228,6 +1231,156 @@ async def stripe_billing_webhook(request: Request) -> dict:
     return result
 
 
+@app.post("/webhooks/heygen")
+async def heygen_webhook(request: Request, response: Response) -> dict:
+    raw_body = await request.body()
+    payload = _parse_webhook_json(raw_body)
+    _verify_heygen_webhook(request, raw_body)
+    event_id = request.headers.get("heygen-event-id") or str(payload.get("event_id") or "")
+    event_type = str(payload.get("event_type") or payload.get("type") or "")
+    data = _heygen_webhook_data(payload)
+    video_id = _heygen_webhook_video_id(data)
+    if not event_type or not video_id:
+        raise HTTPException(status_code=400, detail="HeyGen webhook must include event_type and video_id")
+
+    replay_key = _heygen_webhook_idempotency_key(event_id, raw_body)
+    request_hash = hashlib.sha256(raw_body).hexdigest()
+    try:
+        record = idempotency_store.get(key=replay_key, scope="webhook:heygen", request_hash=request_hash)
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    if record is not None:
+        response.headers["x-idempotent-replay"] = "true"
+        return {"ok": True, "duplicate": True, "event_id": event_id or None, "video_id": video_id}
+
+    result = _apply_heygen_webhook_event(request, event_type, video_id, data)
+    idempotency_store.save(
+        key=replay_key,
+        scope="webhook:heygen",
+        request_hash=request_hash,
+        resource_type="heygen_video",
+        resource_id=video_id,
+    )
+    response.headers["x-idempotent-replay"] = "false"
+    return {"ok": True, "duplicate": False, "event_id": event_id or None, **result}
+
+
+def _parse_webhook_json(raw_body: bytes) -> dict:
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON webhook payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Webhook payload must be an object")
+    return payload
+
+
+def _verify_heygen_webhook(request: Request, raw_body: bytes) -> None:
+    if not settings.heygen_webhook_secret:
+        if settings.app_env not in LOCAL_ENVS:
+            raise HTTPException(status_code=503, detail="HEYGEN_WEBHOOK_SECRET is required")
+        return
+    signature = request.headers.get("heygen-signature")
+    timestamp = request.headers.get("heygen-timestamp")
+    if not signature or not timestamp:
+        raise HTTPException(status_code=401, detail="Missing HeyGen webhook signature")
+    try:
+        timestamp_value = int(timestamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid HeyGen webhook timestamp") from exc
+    if abs(int(time.time()) - timestamp_value) > settings.heygen_webhook_tolerance_seconds:
+        raise HTTPException(status_code=401, detail="Expired HeyGen webhook timestamp")
+    expected = hmac.new(settings.heygen_webhook_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    candidates = [part.strip() for part in signature.split(",") if part.strip()]
+    normalized = [item.split("=", 1)[-1] for item in candidates]
+    if not any(hmac.compare_digest(expected, item) for item in normalized):
+        raise HTTPException(status_code=401, detail="Invalid HeyGen webhook signature")
+
+
+def _heygen_webhook_data(payload: dict) -> dict:
+    data = payload.get("event_data")
+    if data is None:
+        data = payload.get("data")
+    if isinstance(data, dict):
+        return data
+    return payload
+
+
+def _heygen_webhook_video_id(data: dict) -> str:
+    for key in ("video_id", "id", "avatar_video_id"):
+        value = data.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _heygen_webhook_idempotency_key(event_id: str, raw_body: bytes) -> str:
+    source = event_id or raw_body.decode("utf-8", errors="replace")
+    return f"heygen:{hashlib.sha256(source.encode('utf-8')).hexdigest()}"
+
+
+def _apply_heygen_webhook_event(request: Request, event_type: str, video_id: str, data: dict) -> dict:
+    project = _project_for_heygen_video(video_id)
+    if project is None:
+        return {"processed": False, "reason": "video_not_found", "video_id": video_id}
+    details = _heygen_details_from_webhook(event_type, data)
+    project_dir = store.project_dir(project.id)
+    try:
+        updated = pipeline.avatar.apply_webhook_update(project, project_dir, video_id, details)
+        store.save(updated)
+    except Exception as exc:  # noqa: BLE001 - webhook should report provider/update errors clearly
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _audit(
+        request,
+        "heygen.webhook",
+        actor_id=None,
+        resource_type="project",
+        resource_id=updated.id,
+        metadata={
+            "event_type": event_type,
+            "video_id": video_id,
+            "status": details.get("status"),
+        },
+    )
+    return {
+        "processed": True,
+        "project_id": updated.id,
+        "video_id": video_id,
+        "status": details.get("status"),
+    }
+
+
+def _project_for_heygen_video(video_id: str) -> Project | None:
+    for project in store.list_projects():
+        if any(scene.avatar_video_id == video_id for scene in project.scenes):
+            return project
+    return None
+
+
+def _heygen_details_from_webhook(event_type: str, data: dict) -> dict:
+    details = dict(data)
+    event_name = event_type.lower()
+    if "status" not in details:
+        if (
+            event_name in {"avatar_video.success", "video.completed"}
+            or event_name.endswith(".success")
+            or event_name.endswith(".completed")
+            or event_name.endswith("_success")
+        ):
+            details["status"] = "completed"
+        elif (
+            event_name in {"avatar_video.fail", "avatar_video.failed", "video.failed"}
+            or event_name.endswith(".fail")
+            or event_name.endswith(".failed")
+            or event_name.endswith("_fail")
+        ):
+            details["status"] = "failed"
+    video_url = details.get("video_url") or details.get("url") or details.get("download_url")
+    if video_url:
+        details["video_url"] = str(video_url)
+    return details
+
+
 @app.get("/organizations")
 def list_organizations(request: Request) -> list[dict]:
     user = _require_user_auth(request)
@@ -1378,6 +1531,8 @@ def providers() -> dict:
             "auto_sync_enabled": settings.avatar_auto_sync_enabled,
             "auto_sync_interval_seconds": settings.avatar_auto_sync_interval_seconds,
             "auto_render_after_sync": settings.avatar_auto_render_after_sync,
+            "webhook_configured": bool(settings.heygen_webhook_secret),
+            "webhook_tolerance_seconds": settings.heygen_webhook_tolerance_seconds,
         },
         "search": {
             "provider": settings.search_provider,

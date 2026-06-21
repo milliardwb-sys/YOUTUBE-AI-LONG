@@ -327,7 +327,9 @@ The manifest includes project status, scene/source counts, avatar video counts, 
     "motion_prompt_enabled": false,
     "auto_sync_enabled": false,
     "auto_sync_interval_seconds": 60,
-    "auto_render_after_sync": true
+    "auto_render_after_sync": true,
+    "webhook_configured": false,
+    "webhook_tolerance_seconds": 300
   },
   "jobs": {
     "available": [
@@ -698,6 +700,20 @@ HEYGEN_API_KEY + HEYGEN_AVATAR_ID заданы → POST /v3/videos для avatar
 Сбрасывает у выбранной avatar-сцены старые `avatar_video_id`, `avatar_video_status`, `avatar_video_url`, `avatar_video_path` и отправляет в HeyGen только эту сцену.
 
 Если сцена не относится к `avatar_fullscreen`, `avatar_pip`, `screen_demo` или `cta`, API вернёт `409`.
+
+### POST /webhooks/heygen
+
+Публичный endpoint для HeyGen webhook events.
+
+Ожидаемые заголовки при `HEYGEN_WEBHOOK_SECRET`:
+
+```text
+Heygen-Signature: <hmac_sha256_raw_body>
+Heygen-Timestamp: <unix_timestamp>
+Heygen-Event-Id: <event_id>
+```
+
+Backend принимает события `video.completed`/`video.failed` и совместимые `avatar_video.success`/`avatar_video.fail`, ищет сцену по `event_data.video_id`, обновляет `avatar_video_status/avatar_video_url/avatar_video_path` и переписывает `avatar_manifest.json`. Повторный `Heygen-Event-Id` возвращает `duplicate: true`.
 
 ### POST /projects/{id}/render
 

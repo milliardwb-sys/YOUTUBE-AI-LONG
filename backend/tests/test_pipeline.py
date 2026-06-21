@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib
 import json
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zipfile import ZipFile
@@ -69,6 +72,8 @@ def make_settings(tmp_path: Path) -> Settings:
         heygen_remove_background=True,
         heygen_enable_motion_prompt=False,
         heygen_poll_seconds=0,
+        heygen_webhook_secret=None,
+        heygen_webhook_tolerance_seconds=300,
         avatar_auto_sync_enabled=False,
         avatar_auto_sync_interval_seconds=60,
         avatar_auto_render_after_sync=True,
@@ -553,6 +558,100 @@ def test_sync_avatar_job_auto_renders_when_avatar_assets_ready(tmp_path, monkeyp
     assert result.status == ProjectStatus.completed
     assert Path(result.result.final_video_path).exists()
     assert any(event["message"] == "starting_auto_render" for event in saved_job.events)
+
+
+def test_heygen_webhook_updates_scene_and_is_idempotent(tmp_path, monkeypatch):
+    from app.services import avatar_service as avatar_service_module
+
+    secret = "webhook-secret"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("HEYGEN_API_KEY", "heygen-test-key")
+    monkeypatch.setenv("HEYGEN_AVATAR_ID", "avatar_test")
+    monkeypatch.setenv("HEYGEN_WEBHOOK_SECRET", secret)
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+
+    class FakeHeyGenProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download_video(self, video_url, output_path):
+            output_path.write_bytes(f"downloaded {video_url}".encode("utf-8"))
+            return output_path
+
+    monkeypatch.setattr(avatar_service_module, "HeyGenAvatarProvider", FakeHeyGenProvider)
+    client = TestClient(main.app)
+    project = main.store.create_project(
+        ProjectCreate(
+            topic="HeyGen webhook обновляет avatar MP4",
+            duration_minutes=1,
+            style=VideoStyle.ai_news_avatar,
+            avatar_enabled=True,
+        )
+    )
+    project = main.pipeline.generate_script(project.id)
+    target = next(scene for scene in project.scenes if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"})
+    target.avatar_video_id = "video_123"
+    target.avatar_video_status = "processing"
+    main.store.save(project)
+
+    payload = {
+        "event_type": "video.completed",
+        "event_data": {"video_id": "video_123", "url": "https://video.local/video_123.mp4"},
+    }
+    raw_body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    headers = {
+        "content-type": "application/json",
+        "Heygen-Signature": hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest(),
+        "Heygen-Timestamp": str(int(time.time())),
+        "Heygen-Event-Id": "evt_test_123456",
+    }
+
+    response = client.post("/webhooks/heygen", content=raw_body, headers=headers)
+    replay = client.post("/webhooks/heygen", content=raw_body, headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["processed"] is True
+    assert replay.status_code == 200
+    assert replay.json()["duplicate"] is True
+    assert replay.headers["x-idempotent-replay"] == "true"
+    updated = main.store.get(project.id)
+    updated_scene = next(scene for scene in updated.scenes if scene.id == target.id)
+    assert updated.current_step == "avatar_webhook_synced"
+    assert updated_scene.avatar_video_status == "completed"
+    assert updated_scene.avatar_video_url == "https://video.local/video_123.mp4"
+    assert updated_scene.avatar_video_path and Path(updated_scene.avatar_video_path).exists()
+    manifest = json.loads(Path(updated.result.avatar_manifest_path).read_text(encoding="utf-8"))
+    assert manifest["mode"] == "webhook"
+
+
+def test_heygen_webhook_rejects_invalid_signature(tmp_path, monkeypatch):
+    secret = "webhook-secret"
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("HEYGEN_API_KEY", "heygen-test-key")
+    monkeypatch.setenv("HEYGEN_AVATAR_ID", "avatar_test")
+    monkeypatch.setenv("HEYGEN_WEBHOOK_SECRET", secret)
+    monkeypatch.delenv("API_KEY", raising=False)
+    sys.modules.pop("app.main", None)
+    main = importlib.import_module("app.main")
+    client = TestClient(main.app)
+    raw_body = b'{"event_type":"avatar_video.success","event_data":{"video_id":"video_123"}}'
+
+    response = client.post(
+        "/webhooks/heygen",
+        content=raw_body,
+        headers={
+            "content-type": "application/json",
+            "Heygen-Signature": "bad",
+            "Heygen-Timestamp": str(int(time.time())),
+            "Heygen-Event-Id": "evt_test_654321",
+        },
+    )
+
+    assert response.status_code == 401
 
 
 def test_retry_avatar_scene_resets_old_job_and_resubmits_one_scene(tmp_path, monkeypatch):
