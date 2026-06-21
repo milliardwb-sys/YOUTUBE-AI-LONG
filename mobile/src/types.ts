@@ -122,6 +122,9 @@ export type Scene = {
     | 'cta';
   start_sec: number;
   duration_sec: number;
+  avatar_visible?: boolean;
+  visual_prompt?: string | null;
+  source_id?: string | null;
   source_name?: string | null;
   visual_url?: string | null;
   audio_url?: string | null;
@@ -134,9 +137,15 @@ export type Scene = {
 
 export type ScenePatch = {
   title?: string;
+  goal?: string;
   narration?: string;
   duration_sec?: number;
   on_screen_text?: string;
+  visual_type?: Scene['visual_type'];
+  avatar_visible?: boolean;
+  source_id?: string | null;
+  visual_prompt?: string | null;
+  notes?: string | null;
 };
 
 export type SceneCreate = {
@@ -144,6 +153,8 @@ export type SceneCreate = {
   narration: string;
   duration_sec: number;
   visual_type?: Scene['visual_type'];
+  avatar_visible?: boolean;
+  visual_prompt?: string | null;
 };
 
 export type Project = {

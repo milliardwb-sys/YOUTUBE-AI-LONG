@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Button, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Button, Pressable, SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
   cancelJob,
@@ -28,7 +28,44 @@ import {
   startProjectJob,
 } from './src/api';
 import { clearSessionToken, loadSessionToken, saveSessionToken } from './src/session';
-import type { AuditEvent, Project, ProjectJob, ProjectManifest, Scene, UsageOverview, UserPublic } from './src/types';
+import type { AuditEvent, JobType, Project, ProjectJob, ProjectManifest, Scene, UsageOverview, UserPublic } from './src/types';
+
+const VISUAL_TYPE_OPTIONS: Array<{ value: Scene['visual_type']; label: string }> = [
+  { value: 'avatar_fullscreen', label: 'Аватар' },
+  { value: 'avatar_pip', label: 'PIP' },
+  { value: 'screen_demo', label: 'Экран' },
+  { value: 'ai_broll', label: 'AI b-roll' },
+  { value: 'big_caption', label: 'Текст' },
+  { value: 'cta', label: 'CTA' },
+  { value: 'ai_slide', label: 'Слайд' },
+  { value: 'table', label: 'Таблица' },
+  { value: 'diagram', label: 'Схема' },
+  { value: 'screenshot', label: 'Скрин' },
+];
+
+const PROJECT_JOB_ACTIONS: Array<{ type: JobType; title: string }> = [
+  { type: 'generate_script', title: 'Сценарий' },
+  { type: 'collect_sources', title: 'Источники' },
+  { type: 'generate_voice', title: 'Голос' },
+  { type: 'generate_slides', title: 'Кадры' },
+  { type: 'prepare_avatar', title: 'Аватары' },
+  { type: 'render', title: 'Рендер' },
+];
+
+function sceneAssetStatus(scene: Scene): string {
+  const visual = scene.visual_url ? 'кадр готов' : 'кадр нужен';
+  const audio = scene.audio_url ? 'голос готов' : 'голос нужен';
+  const avatar = sceneAvatarStatus(scene);
+  return `${visual} · ${audio} · ${avatar}`;
+}
+
+function sceneAvatarStatus(scene: Scene): string {
+  if (scene.avatar_visible === false) return 'аватар выкл.';
+  if (!['avatar_fullscreen', 'avatar_pip', 'screen_demo', 'cta'].includes(scene.visual_type)) return 'аватар не нужен';
+  if (scene.avatar_video_file_url) return 'аватар MP4 готов';
+  if (scene.avatar_video_status) return `аватар: ${scene.avatar_video_status}`;
+  return 'аватар ждёт';
+}
 
 export default function App() {
   const [topic, setTopic] = useState('AI-аватар показывает 5 сервисов для создания YouTube-видео в 2026 году');
@@ -55,6 +92,8 @@ export default function App() {
   const [sceneTitle, setSceneTitle] = useState('');
   const [sceneNarration, setSceneNarration] = useState('');
   const [sceneDuration, setSceneDuration] = useState('12');
+  const [sceneVisualType, setSceneVisualType] = useState<Scene['visual_type']>('ai_slide');
+  const [sceneAvatarVisible, setSceneAvatarVisible] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -190,6 +229,8 @@ export default function App() {
     setSceneTitle(scene?.title ?? '');
     setSceneNarration(scene?.narration ?? '');
     setSceneDuration(String(scene?.duration_sec ?? 12));
+    setSceneVisualType(scene?.visual_type ?? 'ai_slide');
+    setSceneAvatarVisible(scene?.avatar_visible ?? true);
   }
 
   async function handleOpenProject(projectId: string) {
@@ -310,6 +351,22 @@ export default function App() {
     }
   }
 
+  async function handleStartProjectJob(jobType: JobType) {
+    if (!project) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const queuedJob = await startProjectJob(project.id, jobType);
+      setJob(queuedJob);
+      setManifest(null);
+      await pollJob(project.id, queuedJob);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось запустить этап');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function refreshActiveProject(updated: Project) {
     setProject(updated);
     setManifest(await getProjectManifest(updated.id));
@@ -329,6 +386,8 @@ export default function App() {
         on_screen_text: sceneTitle.trim(),
         narration: sceneNarration.trim(),
         duration_sec: duration,
+        visual_type: sceneVisualType,
+        avatar_visible: sceneAvatarVisible,
       });
       await refreshActiveProject(updated);
       selectScene(updated.scenes.find((scene) => scene.id === selectedSceneId) ?? null);
@@ -348,6 +407,8 @@ export default function App() {
         title: sceneTitle.trim() || 'Ручная сцена',
         narration: sceneNarration.trim() || 'Ручной текст диктора для новой сцены.',
         duration_sec: Math.max(5, Math.min(240, Number.parseInt(sceneDuration, 10) || 12)),
+        visual_type: sceneVisualType,
+        avatar_visible: sceneAvatarVisible,
       });
       await refreshActiveProject(updated);
       selectScene(updated.scenes[updated.scenes.length - 1] ?? null);
@@ -621,6 +682,13 @@ export default function App() {
               <Button title="Копировать" onPress={handleDuplicateProject} disabled={loading} />
               <Button title="Удалить" onPress={handleDeleteProject} disabled={loading} />
             </View>
+            <View style={styles.jobActionGrid}>
+              {PROJECT_JOB_ACTIONS.map((action) => (
+                <View key={action.type} style={styles.jobActionButton}>
+                  <Button title={action.title} onPress={() => handleStartProjectJob(action.type)} disabled={loading} />
+                </View>
+              ))}
+            </View>
             {job ? <Text>Задача: {job.status} · {job.progress}% · {job.current_step}</Text> : null}
             {job?.events?.slice(-5).map((event, index) => (
               <Text key={`${event.created_at}-${index}`} style={styles.event}>
@@ -665,6 +733,36 @@ export default function App() {
                 placeholder="длительность в секундах"
                 keyboardType="numeric"
               />
+              <Text style={styles.formLabel}>Тип кадра</Text>
+              <View style={styles.segmentGrid}>
+                {VISUAL_TYPE_OPTIONS.map((option) => {
+                  const active = option.value === sceneVisualType;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      onPress={() => setSceneVisualType(option.value)}
+                      style={[styles.segmentButton, active ? styles.segmentButtonActive : null]}
+                      disabled={loading}
+                    >
+                      <Text style={[styles.segmentText, active ? styles.segmentTextActive : null]}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.inlineSwitch}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inlineSwitchTitle}>Аватар в сцене</Text>
+                  <Text style={styles.inlineSwitchHint}>{sceneAvatarVisible ? 'Будет использоваться для avatar/PIP/screen/CTA сцен' : 'Сцена останется без avatar MP4'}</Text>
+                </View>
+                <Switch value={sceneAvatarVisible} onValueChange={setSceneAvatarVisible} disabled={loading} />
+              </View>
+              {selectedScene ? (
+                <View style={styles.sceneReadinessBox}>
+                  <Text style={styles.sceneReadinessTitle}>Готовность выбранной сцены</Text>
+                  <Text style={styles.sceneReadinessText}>{sceneAssetStatus(selectedScene)}</Text>
+                  {selectedScene.source_name ? <Text style={styles.sceneReadinessText}>Источник: {selectedScene.source_name}</Text> : null}
+                </View>
+              ) : null}
               <View style={styles.buttonRow}>
                 <Button title="Сохранить" onPress={handleSaveScene} disabled={loading || !selectedScene || sceneTitle.trim().length < 1} />
                 <Button title="Добавить" onPress={handleAddScene} disabled={loading || sceneTitle.trim().length < 1} />
@@ -718,10 +816,13 @@ export default function App() {
             {project.result?.export_package_url ? (
               <Text style={styles.link}>Пакет экспорта: {project.result.export_package_url}</Text>
             ) : null}
-            {project.scenes?.slice(0, 5).map((scene) => (
-              <Text key={scene.id} style={styles.scene}>
-                #{scene.order} {scene.title} · {scene.visual_type}{scene.avatar_video_status ? ` · аватар: ${scene.avatar_video_status}` : ''}
-              </Text>
+            {project.scenes?.slice(0, 8).map((scene) => (
+              <View key={scene.id} style={styles.sceneReadinessRow}>
+                <Text style={styles.sceneReadinessName}>
+                  #{scene.order} {scene.title} · {scene.visual_type}
+                </Text>
+                <Text style={styles.sceneReadinessText}>{sceneAssetStatus(scene)}</Text>
+              </View>
             ))}
             {project.sources?.slice(0, 4).map((source) => (
               <Text key={source.id} style={styles.source}>• {source.name} — {source.status}</Text>
@@ -777,6 +878,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  jobActionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  jobActionButton: { minWidth: 104, flexGrow: 1 },
   emptyText: { color: '#c8d0ee' },
   projectListItem: {
     backgroundColor: '#eef2ff',
@@ -794,6 +897,7 @@ const styles = StyleSheet.create({
   usageText: { color: '#ecfccb', fontWeight: '700' },
   usageMeta: { color: '#d9f99d', fontSize: 12 },
   label: { color: 'white', fontWeight: '700', marginTop: 16 },
+  formLabel: { color: '#334155', fontWeight: '800', marginTop: 4 },
   input: {
     minHeight: 110,
     backgroundColor: 'white',
@@ -827,6 +931,33 @@ const styles = StyleSheet.create({
   scenePickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   scenePickerText: { color: '#334155', flex: 1 },
   sceneNarrationInput: { minHeight: 90, textAlignVertical: 'top' },
+  segmentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  segmentButton: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#f8fafc',
+  },
+  segmentButtonActive: { backgroundColor: '#111827', borderColor: '#111827' },
+  segmentText: { color: '#334155', fontWeight: '800', fontSize: 12 },
+  segmentTextActive: { color: 'white' },
+  inlineSwitch: {
+    backgroundColor: '#eef2ff',
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  inlineSwitchTitle: { color: '#111827', fontWeight: '800' },
+  inlineSwitchHint: { color: '#475569', fontSize: 12, marginTop: 2 },
+  sceneReadinessBox: { backgroundColor: '#f8fafc', borderRadius: 8, padding: 10, gap: 3 },
+  sceneReadinessRow: { backgroundColor: '#f8fafc', borderRadius: 8, padding: 10, gap: 3, marginTop: 6 },
+  sceneReadinessTitle: { color: '#111827', fontWeight: '800' },
+  sceneReadinessName: { color: '#0f172a', fontWeight: '800' },
+  sceneReadinessText: { color: '#475569', fontSize: 12 },
   card: { backgroundColor: 'white', padding: 18, borderRadius: 18, gap: 8, marginTop: 18 },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
   link: { color: '#2457c5' },

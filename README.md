@@ -313,9 +313,13 @@ curl -X PATCH http://localhost:8000/projects/<project_id>/scenes/<scene_id> \
     "title": "Новый хук",
     "on_screen_text": "AI-видео: что выбрать",
     "duration_sec": 20,
+    "visual_type": "screen_demo",
+    "avatar_visible": true,
     "visual_prompt": "neon SaaS explainer slide with huge readable title"
   }'
 ```
+
+В мобильном редакторе можно менять `visual_type`, включать/выключать аватар на сцене, видеть готовность кадра/голоса/аватара и запускать отдельные job-этапы: сценарий, источники, голос, кадры, аватары и рендер.
 
 Переставить сцены:
 

@@ -782,6 +782,8 @@ render
 
 После смены длительности backend пересчитывает `start_sec` для следующих сцен. Если меняется визуальная часть, `visual_path` очищается. Если меняется narration/duration, `audio_path` и subtitle paths очищаются.
 
+Мобильный клиент использует этот endpoint для управления `visual_type`, `avatar_visible` и готовностью сцены: кадр, голос, avatar MP4. Отдельные этапы проекта можно запускать через `POST /projects/{id}/jobs/{job_type}` без полного `generate_all`.
+
 ### POST /projects/{id}/scenes
 
 Вставляет новую сцену.
