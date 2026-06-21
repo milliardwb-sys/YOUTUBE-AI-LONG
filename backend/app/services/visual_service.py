@@ -267,6 +267,7 @@ class VisualService:
         else:
             self._draw_mock_screen_content(draw, box, scene, template)
         self._draw_cursor(draw, self.width - 465, self.height - 355)
+        self._draw_screen_demo_overlays(draw, box, scene, source, template)
         self._draw_pip_avatar(draw, project, scene, x=125, y=self.height - 385)
         self._draw_footer(draw, project, scene, template.footer_label)
         image.save(path, "PNG", optimize=True)
@@ -427,6 +428,30 @@ class VisualService:
     def _draw_cursor(self, draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
         draw.polygon([(x, y), (x, y + 80), (x + 26, y + 58), (x + 57, y + 122), (x + 86, y + 108), (x + 55, y + 47), (x + 92, y + 45)], fill=(255, 255, 255), outline=(15, 23, 42))
         draw.line([(x + 56, y + 52), (x + 90, y + 122)], fill=(15, 23, 42), width=5)
+
+    def _draw_screen_demo_overlays(
+        self,
+        draw: ImageDraw.ImageDraw,
+        box: list[int],
+        scene: Scene,
+        source: SourceCandidate | None,
+        template: SlideTemplate,
+    ) -> None:
+        label = source.name if source else "AI/source fallback"
+        pill = [box[0] + 44, box[1] + 88, box[0] + 540, box[1] + 145]
+        draw.rounded_rectangle(pill, radius=18, fill=(15, 23, 42), outline=template.palette["accent"], width=2)
+        draw.text((pill[0] + 24, pill[1] + 14), f"Источник: {label}"[:44], font=self.font_tiny, fill=(255, 255, 255))
+
+        highlight = [box[2] - 690, box[1] + 250, box[2] - 150, box[1] + 520]
+        draw.rounded_rectangle(highlight, radius=26, outline=(255, 221, 51), width=8)
+        draw.line([highlight[0] - 42, highlight[1] + 50, highlight[0], highlight[1] + 90], fill=(255, 221, 51), width=7)
+        draw.ellipse([highlight[0] - 62, highlight[1] + 28, highlight[0] - 22, highlight[1] + 68], fill=(255, 221, 51))
+
+        callout = [box[0] + 44, box[3] - 168, box[2] - 44, box[3] - 52]
+        draw.rounded_rectangle(callout, radius=24, fill=(0, 0, 0), outline=template.palette["accent"], width=2)
+        text = scene.on_screen_text or scene.source_query or scene.title
+        for line_index, line in enumerate(wrap_text(text, width=58)[:2]):
+            draw.text((callout[0] + 34, callout[1] + 22 + line_index * 42), line, font=self.font_small, fill=(255, 255, 255))
 
     def _paste_contained(self, image: Image.Image, source: Image.Image, box: list[int]) -> None:
         target_w = box[2] - box[0]
@@ -774,6 +799,9 @@ class VisualService:
             "palette": {key: list(value) for key, value in template.palette.items()},
             "avatar_mode": self._avatar_mode_for_scene(scene),
             "asset_role": self._asset_role_for_scene(scene),
+            "source_query": scene.source_query,
+            "composition_layers": self._composition_layers_for_scene(scene),
+            "replacement_slots": self._replacement_slots_for_scene(scene),
             "montage_note": self._montage_note_for_scene(scene),
         }
 
@@ -790,6 +818,7 @@ class VisualService:
             "visual_type": scene.visual_type,
             "strategy": strategy,
             "source_id": scene.source_id,
+            "source_query": scene.source_query,
             "source_name": scene.source_name,
             "source_url": scene.source_url,
             "source_screenshot_path": source.screenshot_path if source else None,
@@ -800,6 +829,8 @@ class VisualService:
                 "Use user-provided/official platform screenshots or original model-generated images. "
                 "Do not use third-party YouTube frames without rights."
             ),
+            "fallback_ready": True,
+            "production_next_step": self._production_next_step_for_scene(scene),
         }
 
     def _avatar_mode_for_scene(self, scene: Scene) -> str:
@@ -822,6 +853,39 @@ class VisualService:
             "diagram": "process_diagram",
         }
         return roles.get(scene.visual_type, "original_slide")
+
+    def _composition_layers_for_scene(self, scene: Scene) -> list[str]:
+        layers = ["background", "safe_title_area"]
+        if scene.visual_type in {"screenshot", "screen_demo"}:
+            layers.extend(["browser_frame", "source_screenshot", "cursor_or_highlight"])
+        if scene.visual_type == "ai_broll":
+            layers.extend(["generated_image_or_template_broll", "motion_caption"])
+        if scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"} and scene.avatar_visible:
+            layers.append("heygen_avatar_video")
+        if scene.visual_type in {"big_caption", "cta"}:
+            layers.append("large_caption_text")
+        layers.extend(["burned_caption_zone", "footer_source_label"])
+        return layers
+
+    def _replacement_slots_for_scene(self, scene: Scene) -> dict[str, str | None]:
+        return {
+            "primary_visual": "source_screenshot" if scene.visual_type in {"screenshot", "screen_demo"} else "generated_or_template_visual",
+            "avatar_video": "heygen_mp4" if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"} else None,
+            "voiceover": "scene_audio",
+            "caption": "burned_subtitles_or_on_screen_text",
+            "source_query": scene.source_query,
+        }
+
+    def _production_next_step_for_scene(self, scene: Scene) -> str:
+        if scene.visual_type in {"screenshot", "screen_demo"}:
+            if scene.source_id:
+                return "Capture/crop the selected source page and replace fallback card if a real browser screenshot is enabled."
+            return "Pick a source or run collect_sources with a real search provider."
+        if scene.visual_type == "ai_broll":
+            return "Enable model image/video generation or replace with approved stock/original b-roll."
+        if scene.visual_type in {"avatar_fullscreen", "avatar_pip", "cta"}:
+            return "Sync HeyGen avatar MP4 and composite it during render."
+        return "Template is render-ready; optional manual polish can improve pacing."
 
     def _montage_note_for_scene(self, scene: Scene) -> str:
         notes = {

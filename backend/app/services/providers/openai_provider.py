@@ -43,7 +43,7 @@ Visual policy: {visual_policy}
 Avatar enabled: {project.avatar_enabled}
 
 Return JSON object:
-{{"scenes":[{{"title":"short title","goal":"one sentence goal","narration":"natural voiceover text","on_screen_text":"short overlay text","visual_type":"ai_slide|screenshot|table|diagram|avatar_fullscreen|avatar_pip|screen_demo|ai_broll|big_caption|cta","visual_prompt":"specific visual direction","notes":"source/production notes"}}]}}
+{{"scenes":[{{"title":"short title","goal":"one sentence goal","narration":"natural voiceover text","on_screen_text":"short overlay text","visual_type":"ai_slide|screenshot|table|diagram|avatar_fullscreen|avatar_pip|screen_demo|ai_broll|big_caption|cta","source_query":"official source/search query for this scene or null","visual_prompt":"specific visual direction","notes":"source/production notes"}}]}}
 
 Rules:
 - Return exactly {scene_count} scenes.
@@ -96,6 +96,7 @@ Rules:
                     narration=self._clean(item.get("narration"), project.topic) or project.topic,
                     on_screen_text=self._clean(item.get("on_screen_text"), item.get("title") or project.topic) or project.topic,
                     visual_type=visual_type,  # type: ignore[arg-type]
+                    source_query=self._clean(item.get("source_query"), None),
                     visual_prompt=self._clean(item.get("visual_prompt"), None),
                     notes=self._clean(item.get("notes"), None),
                     duration_sec=base_duration,

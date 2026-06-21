@@ -7,7 +7,8 @@ from app.config import Settings
 from app.models import Project, ProjectStatus, SourceCandidate, SourceKind, VisualMode
 from app.services.search_provider import DisabledSearchProvider, SearchProviderUnavailable, make_search_provider
 from app.services.screenshot_service import ScreenshotService
-from app.utils.files import ensure_dir
+from app.services.visual_plan_service import SOURCE_VISUAL_TYPES, VisualPlanDecision, VisualPlanService
+from app.utils.files import ensure_dir, write_json
 from app.utils.security import UnsafeUrlError, validate_source_url
 
 
@@ -24,6 +25,7 @@ class SourceService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.screenshots = ScreenshotService(settings)
+        self.visual_plan = VisualPlanService()
         try:
             self.search_provider = make_search_provider(settings)
         except SearchProviderUnavailable as exc:
@@ -35,9 +37,11 @@ class SourceService:
     def collect_sources(self, project: Project, project_dir: Path) -> Project:
         project.status = ProjectStatus.researching
         project.touch("researching_sources")
+        plan = self.visual_plan.plan_project(project)
 
         if project.visual_mode != VisualMode.official_sites_plus_ai and not project.source_urls:
             project.sources = []
+            project.result.visual_plan_path = str(self._write_visual_plan(project, project_dir, plan))
             project.touch("sources_skipped")
             return project
 
@@ -57,6 +61,7 @@ class SourceService:
 
         project.sources = captured
         self._assign_sources_to_scenes(project)
+        project.result.visual_plan_path = str(self._write_visual_plan(project, project_dir, plan))
         project.status = ProjectStatus.sources_ready
         project.touch("sources_ready")
         return project
@@ -85,11 +90,15 @@ class SourceService:
                 project.result.warnings.append(warning)
             return []
         try:
-            results = self.search_provider.search(
-                project.topic,
-                count=self.settings.search_result_count,
-                language=project.language,
-            )
+            results = []
+            for query in self._search_queries(project):
+                results.extend(
+                    self.search_provider.search(
+                        query,
+                        count=self.settings.search_result_count,
+                        language=project.language,
+                    )
+                )
         except Exception as exc:  # noqa: BLE001 - search must never break local generation
             warning = f"Search provider failed; curated sources were used: {exc}"
             if warning not in project.result.warnings:
@@ -190,15 +199,93 @@ class SourceService:
     def _assign_sources_to_scenes(self, project: Project) -> None:
         if not project.sources:
             return
-        source_index = 0
+        usage_count: dict[str, int] = {}
         for scene in project.scenes:
-            if scene.visual_type not in {"screenshot", "screen_demo"}:
+            if scene.visual_type not in SOURCE_VISUAL_TYPES:
                 continue
-            source = project.sources[source_index % len(project.sources)]
+            if scene.source_id:
+                existing = next((item for item in project.sources if item.id == scene.source_id), None)
+                if existing:
+                    scene.source_name = existing.name
+                    scene.source_url = existing.url
+                    usage_count[existing.id] = usage_count.get(existing.id, 0) + 1
+                    continue
+            source = self._best_source_for_scene(project.sources, scene, usage_count)
             scene.source_id = source.id
             scene.source_name = source.name
             scene.source_url = source.url
-            source_index += 1
+            usage_count[source.id] = usage_count.get(source.id, 0) + 1
+
+    def _best_source_for_scene(
+        self,
+        sources: list[SourceCandidate],
+        scene,
+        usage_count: dict[str, int],
+    ) -> SourceCandidate:
+        query_words = self._keywords(" ".join([scene.source_query or "", scene.title, scene.goal, scene.visual_prompt or ""]))
+        scored: list[tuple[int, SourceCandidate]] = []
+        for source in sources:
+            source_words = self._keywords(" ".join([source.name, source.url, source.reason, source.kind.value]))
+            overlap = len(query_words.intersection(source_words))
+            official_bonus = 3 if source.kind in {SourceKind.official_website, SourceKind.user_provided} else 0
+            captured_bonus = 2 if source.status in {"captured", "fallback_card"} and source.screenshot_path else 0
+            reuse_penalty = usage_count.get(source.id, 0) * 4
+            score = overlap + official_bonus + captured_bonus - reuse_penalty
+            scored.append((score, source))
+        scored.sort(key=lambda item: (item[0], -usage_count.get(item[1].id, 0), item[1].name.lower()), reverse=True)
+        return scored[0][1]
+
+    def _search_queries(self, project: Project) -> list[str]:
+        queries = [project.topic]
+        for scene in project.scenes:
+            if scene.source_query:
+                queries.append(scene.source_query)
+        result: list[str] = []
+        seen: set[str] = set()
+        for query in queries:
+            normalized = " ".join(query.split())
+            key = normalized.lower()
+            if not normalized or key in seen:
+                continue
+            seen.add(key)
+            result.append(normalized)
+            if len(result) >= 4:
+                break
+        return result
+
+    def _keywords(self, value: str) -> set[str]:
+        tokens = []
+        for token in value.lower().replace("https://", " ").replace("http://", " ").split():
+            cleaned = token.strip(".,:;!?/()[]{}|\"'«»").replace("www.", "")
+            if len(cleaned) < 3:
+                continue
+            if cleaned in {"official", "website", "features", "pricing", "dashboard", "источник", "сайт"}:
+                continue
+            tokens.append(cleaned)
+        return set(tokens)
+
+    def _write_visual_plan(self, project: Project, project_dir: Path, plan: list[VisualPlanDecision]) -> Path:
+        plan_path = ensure_dir(project_dir / "assets") / "visual_plan.json"
+        scenes_by_id = {scene.id: scene for scene in project.scenes}
+        write_json(
+            plan_path,
+            [
+                {
+                    "scene_id": item.scene_id,
+                    "scene_order": item.scene_order,
+                    "visual_type": item.visual_type,
+                    "avatar_visible": item.avatar_visible,
+                    "source_query": item.source_query,
+                    "source_id": scenes_by_id[item.scene_id].source_id if item.scene_id in scenes_by_id else None,
+                    "source_name": scenes_by_id[item.scene_id].source_name if item.scene_id in scenes_by_id else None,
+                    "source_url": scenes_by_id[item.scene_id].source_url if item.scene_id in scenes_by_id else None,
+                    "visual_prompt": item.visual_prompt,
+                    "reason": item.reason,
+                }
+                for item in plan
+            ],
+        )
+        return plan_path
 
     def _name_from_url(self, url: str) -> str:
         domain = urlparse(url).netloc or url

@@ -643,6 +643,8 @@ script_provider=openai   → OpenAI LLM; если ошибка, fallback на te
 - fallback-карточки источников;
 - опциональные браузерные скриншоты при `ENABLE_BROWSER_SCREENSHOTS=true`.
 
+Перед сбором источников backend строит `visual_plan.json`: для каждой сцены фиксируются `visual_type`, `avatar_visible`, `source_query`, `visual_prompt` и причина выбора. Поиск источников использует не только тему проекта, но и per-scene `source_query`; затем matcher привязывает лучший источник к `screenshot`/`screen_demo` сценам.
+
 ### POST /projects/{id}/generate-voice
 
 Создаёт аудио по сценам, `subtitles.srt`, `captions.vtt` и `voice_manifest.json`.
@@ -673,7 +675,7 @@ big_caption
 cta
 ```
 
-Для `screen_demo` backend использует user URLs, search/curated official websites и fallback-карточки источников. Для `ai_broll` можно включить `ENABLE_MODEL_IMAGES=true`, тогда backend попробует создать оригинальную картинку через `OPENAI_IMAGE_MODEL`; при ошибке остаётся offline-template.
+Для `screen_demo` backend использует user URLs, search/curated official websites и fallback-карточки источников. Template manifest содержит `composition_layers` и `replacement_slots`, чтобы было понятно, где в production заменять fallback на реальный screen capture, avatar MP4, subtitles или AI b-roll. Для `ai_broll` можно включить `ENABLE_MODEL_IMAGES=true`, тогда backend попробует создать оригинальную картинку через `OPENAI_IMAGE_MODEL`; при ошибке остаётся offline-template.
 
 ### POST /projects/{id}/prepare-avatar
 
@@ -719,6 +721,8 @@ Backend принимает события `video.completed`/`video.failed` и с
 
 Собирает `final.mp4` через FFmpeg и создаёт export package. Если локальные avatar MP4 отсутствуют, используется обычный slideshow render. Если есть `avatar_video_path`, backend рендерит per-scene segments и собирает avatar composite video.
 
+`render_manifest.json` содержит `production_timeline`: для каждой сцены указаны `visual_type`, `source_query`, выбранный источник, ожидается ли avatar overlay, используется ли source insert / AI b-roll и порядок слоёв (`slide_base`, `source_screenshot`, `avatar_video_overlay`, `subtitles`).
+
 Если `FFMPEG_BIN` отсутствует в PATH, backend пробует bundled fallback из `imageio-ffmpeg`. Если ни один FFmpeg binary не найден, проект получает `failed`, но backend всё равно создаёт manifest/export package с доступными артефактами. В синхронном HTTP endpoint это будет `500`; в job mode ошибка попадёт в `job.error`.
 
 Результаты:
@@ -737,6 +741,7 @@ youtube_metadata.json
 quality_report.json
 voice_manifest.json
 avatar_manifest.json
+visual_plan.json
 visual_assets_manifest.json
 render_manifest.json
 result_package.zip
@@ -777,13 +782,14 @@ render
   "duration_sec": 20,
   "avatar_visible": true,
   "source_id": "source_...",
+  "source_query": "HeyGen AI avatar pricing official website",
   "visual_prompt": "neon SaaS explainer slide with huge readable title"
 }
 ```
 
 После смены длительности backend пересчитывает `start_sec` для следующих сцен. Если меняется визуальная часть, `visual_path` очищается. Если меняется narration/duration, `audio_path` и subtitle paths очищаются.
 
-Мобильный клиент использует этот endpoint для управления `visual_type`, `source_id`, `visual_prompt`, `avatar_visible` и готовностью сцены: кадр, голос, avatar MP4. Отдельные этапы проекта можно запускать через `POST /projects/{id}/jobs/{job_type}` без полного `generate_all`.
+Мобильный клиент использует этот endpoint для управления `visual_type`, `source_id`, `source_query`, `visual_prompt`, `avatar_visible` и готовностью сцены: кадр, голос, avatar MP4. Отдельные этапы проекта можно запускать через `POST /projects/{id}/jobs/{job_type}` без полного `generate_all`.
 
 ### POST /projects/{id}/scenes
 
@@ -797,6 +803,7 @@ render
   "duration_sec": 12,
   "visual_type": "diagram",
   "source_id": "source_...",
+  "source_query": "official product workflow dashboard",
   "visual_prompt": "clean product UI screenshot with readable Russian labels",
   "order": 2
 }
@@ -862,6 +869,7 @@ render
   "quality_report_url": "http://localhost:8000/files/.../quality_report.json",
   "voice_manifest_url": "http://localhost:8000/files/.../voice_manifest.json",
   "avatar_manifest_url": "http://localhost:8000/files/.../avatar_manifest.json",
+  "visual_plan_url": "http://localhost:8000/files/.../visual_plan.json",
   "visual_assets_manifest_url": "http://localhost:8000/files/.../visual_assets_manifest.json",
   "render_manifest_url": "http://localhost:8000/files/.../render_manifest.json",
   "export_package_url": "http://localhost:8000/files/.../result_package.zip"

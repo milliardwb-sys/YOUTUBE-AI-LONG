@@ -95,6 +95,7 @@ export default function App() {
   const [sceneVisualType, setSceneVisualType] = useState<Scene['visual_type']>('ai_slide');
   const [sceneAvatarVisible, setSceneAvatarVisible] = useState(true);
   const [sceneSourceId, setSceneSourceId] = useState<string | null>(null);
+  const [sceneSourceQuery, setSceneSourceQuery] = useState('');
   const [sceneVisualPrompt, setSceneVisualPrompt] = useState('');
 
   useEffect(() => {
@@ -234,6 +235,7 @@ export default function App() {
     setSceneVisualType(scene?.visual_type ?? 'ai_slide');
     setSceneAvatarVisible(scene?.avatar_visible ?? true);
     setSceneSourceId(scene?.source_id ?? null);
+    setSceneSourceQuery(scene?.source_query ?? '');
     setSceneVisualPrompt(scene?.visual_prompt ?? '');
   }
 
@@ -393,6 +395,7 @@ export default function App() {
         visual_type: sceneVisualType,
         avatar_visible: sceneAvatarVisible,
         source_id: sceneSourceId,
+        source_query: sceneSourceQuery.trim() || null,
         visual_prompt: sceneVisualPrompt.trim() || null,
       });
       await refreshActiveProject(updated);
@@ -416,6 +419,7 @@ export default function App() {
         visual_type: sceneVisualType,
         avatar_visible: sceneAvatarVisible,
         source_id: sceneSourceId,
+        source_query: sceneSourceQuery.trim() || null,
         visual_prompt: sceneVisualPrompt.trim() || null,
       });
       await refreshActiveProject(updated);
@@ -516,6 +520,7 @@ export default function App() {
   const selectedSceneIndex = project?.scenes?.findIndex((scene) => scene.id === selectedSceneId) ?? -1;
   const sourceOptions = project?.sources?.slice(0, 8) ?? [];
   const selectedFormSourceName = sourceOptions.find((source) => source.id === sceneSourceId)?.name ?? selectedScene?.source_name ?? null;
+  const selectedFormSourceQuery = sceneSourceQuery.trim() || selectedScene?.source_query || null;
   const canMoveSceneUp = selectedSceneIndex > 0;
   const canMoveSceneDown = Boolean(project?.scenes && selectedSceneIndex >= 0 && selectedSceneIndex < project.scenes.length - 1);
 
@@ -787,6 +792,13 @@ export default function App() {
               {sourceOptions.length ? null : (
                 <Text style={styles.helperText}>Источники появятся после этапа «Источники».</Text>
               )}
+              <Text style={styles.formLabel}>Поисковый запрос источника</Text>
+              <TextInput
+                value={sceneSourceQuery}
+                onChangeText={setSceneSourceQuery}
+                style={styles.compactInput}
+                placeholder="например: HeyGen AI avatar pricing official website"
+              />
               <Text style={styles.formLabel}>Промпт визуала</Text>
               <TextInput
                 value={sceneVisualPrompt}
@@ -807,6 +819,7 @@ export default function App() {
                   <Text style={styles.sceneReadinessTitle}>Готовность выбранной сцены</Text>
                   <Text style={styles.sceneReadinessText}>{sceneAssetStatus(selectedScene)}</Text>
                   <Text style={styles.sceneReadinessText}>Источник: {selectedFormSourceName ?? 'не выбран'}</Text>
+                  <Text style={styles.sceneReadinessText}>Поиск: {selectedFormSourceQuery ?? 'не задан'}</Text>
                   <Text style={styles.sceneReadinessText}>
                     Промпт: {(selectedScene.visual_prompt ?? sceneVisualPrompt).trim().length ? 'задан' : 'не задан'}
                   </Text>
@@ -859,6 +872,9 @@ export default function App() {
             {project.result?.avatar_manifest_url ? (
               <Text style={styles.link}>Манифест аватара: {project.result.avatar_manifest_url}</Text>
             ) : null}
+            {project.result?.visual_plan_url ? (
+              <Text style={styles.link}>План визуалов: {project.result.visual_plan_url}</Text>
+            ) : null}
             {project.result?.visual_assets_manifest_url ? (
               <Text style={styles.link}>Манифест визуалов: {project.result.visual_assets_manifest_url}</Text>
             ) : null}
@@ -872,7 +888,7 @@ export default function App() {
                 </Text>
                 <Text style={styles.sceneReadinessText}>{sceneAssetStatus(scene)}</Text>
                 <Text style={styles.sceneReadinessText}>
-                  Источник: {scene.source_name ?? 'не выбран'} · Промпт: {scene.visual_prompt ? 'есть' : 'нет'}
+                  Источник: {scene.source_name ?? 'не выбран'} · Поиск: {scene.source_query ? 'есть' : 'нет'} · Промпт: {scene.visual_prompt ? 'есть' : 'нет'}
                 </Text>
               </View>
             ))}

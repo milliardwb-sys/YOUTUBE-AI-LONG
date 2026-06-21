@@ -567,6 +567,7 @@ class ScenePatch(BaseModel):
     duration_sec: int | None = Field(default=None, ge=5, le=240)
     avatar_visible: bool | None = None
     source_id: str | None = None
+    source_query: str | None = Field(default=None, max_length=240)
     visual_prompt: str | None = Field(default=None, max_length=700)
     notes: str | None = Field(default=None, max_length=700)
 
@@ -580,6 +581,7 @@ class SceneCreate(BaseModel):
     duration_sec: int = Field(default=12, ge=5, le=240)
     avatar_visible: bool = True
     source_id: str | None = None
+    source_query: str | None = Field(default=None, max_length=240)
     visual_prompt: str | None = Field(default=None, max_length=700)
     notes: str | None = Field(default="Manual scene inserted from API.", max_length=700)
     after_scene_id: str | None = None
@@ -617,6 +619,7 @@ class Scene(BaseModel):
     start_sec: int = 0
     avatar_visible: bool = True
     source_id: str | None = None
+    source_query: str | None = None
     source_name: str | None = None
     source_url: str | None = None
     visual_path: str | None = None
@@ -642,6 +645,7 @@ class ProjectResult(BaseModel):
     quality_report_path: str | None = None
     voice_manifest_path: str | None = None
     avatar_manifest_path: str | None = None
+    visual_plan_path: str | None = None
     visual_assets_manifest_path: str | None = None
     render_manifest_path: str | None = None
     export_package_path: str | None = None

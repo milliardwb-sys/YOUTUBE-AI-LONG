@@ -174,6 +174,7 @@ RESULT_ARTIFACT_KEYS = [
     "quality_report_path",
     "voice_manifest_path",
     "avatar_manifest_path",
+    "visual_plan_path",
     "visual_assets_manifest_path",
     "render_manifest_path",
     "export_package_path",

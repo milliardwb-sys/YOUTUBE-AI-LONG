@@ -17,6 +17,7 @@ VideoPipeline
   │   ├─ template generator
   │   └─ OpenAILLMProvider optional
   ├─ SourceService
+  │   ├─ VisualPlanService
   │   └─ ScreenshotService
   │       ├─ fallback source cards
   │       └─ Playwright optional
@@ -81,6 +82,7 @@ JobStore            — файловое хранилище job_*.json
 JobRunner           — локальный ThreadPoolExecutor для job pipeline
 ScriptService       — template/OpenAI сценарии
 SourceService       — безопасные источники
+VisualPlanService   — per-scene visual_type/source_query/visual_prompt/avatar plan
 ScreenshotService   — fallback-карточки / Playwright screenshots
 VoiceService        — placeholder/OpenAI TTS + SRT/VTT + manifest
 VisualService       — PNG-слайды 1920x1080
@@ -229,6 +231,8 @@ backend/data/projects/_auth/sessions/session_*.json
 
 ```text
 assets/sources/*.png
+assets/visual_plan.json
+assets/visual_assets_manifest.json
 slides/*.png
 audio/*.wav
 video/final.mp4

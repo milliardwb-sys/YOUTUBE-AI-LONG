@@ -21,12 +21,14 @@
 - безопасный `SourceService`: user URLs + curated official websites;
 - `ScreenshotService` с офлайн fallback-карточками источников;
 - опциональный браузерный screenshot-capture через Playwright;
+- `visual_plan.json`: per-scene план `visual_type`, `source_query`, avatar layout и prompt для реальных вставок;
 - генератор 16:9 PNG-слайдов через Pillow;
 - режимы визуалов: `ai_slide`, `screenshot`, `table`, `diagram`, `avatar_fullscreen`, `avatar_pip`, `screen_demo`, `ai_broll`, `big_caption`, `cta`;
 - генератор WAV-аудио-заглушек;
 - опциональный OpenAI TTS-провайдер для озвучки;
 - `voice_manifest.json` с информацией по аудио каждой сцены;
 - `avatar_manifest.json` для HeyGen-задач и fallback-аватаров;
+- `visual_plan.json` для автоподбора источников, screen-demo сцен и AI b-roll prompts;
 - `visual_assets_manifest.json` для скриншотов платформ, model images и offline-шаблонов;
 - экспорт SRT и VTT;
 - рендер MP4 через FFmpeg;
@@ -166,6 +168,7 @@ project.json
 assets/sources/*.png
 assets/avatar/avatar_manifest.json
 assets/generated_images/*.png
+assets/visual_plan.json
 assets/visual_assets_manifest.json
 slides/*.png
 audio/*.wav
@@ -301,7 +304,8 @@ curl -X POST http://localhost:8000/projects/<project_id>/scenes \
     "duration_sec": 12,
     "order": 2,
     "visual_type": "screen_demo",
-    "source_id": "source_..."
+    "source_id": "source_...",
+    "source_query": "HeyGen AI avatar pricing official website"
   }'
 ```
 
@@ -317,11 +321,12 @@ curl -X PATCH http://localhost:8000/projects/<project_id>/scenes/<scene_id> \
     "visual_type": "screen_demo",
     "avatar_visible": true,
     "source_id": "source_...",
+    "source_query": "HeyGen AI avatar pricing official website",
     "visual_prompt": "neon SaaS explainer slide with huge readable title"
   }'
 ```
 
-В мобильном редакторе можно менять `visual_type`, выбирать `source_id` из собранных источников, задавать `visual_prompt`, включать/выключать аватар на сцене, видеть готовность кадра/голоса/аватара и запускать отдельные job-этапы: сценарий, источники, голос, кадры, аватары и рендер.
+В мобильном редакторе можно менять `visual_type`, выбирать `source_id` из собранных источников, задавать `source_query` и `visual_prompt`, включать/выключать аватар на сцене, видеть готовность кадра/голоса/аватара и запускать отдельные job-этапы: сценарий, источники, голос, кадры, аватары и рендер.
 
 Переставить сцены:
 

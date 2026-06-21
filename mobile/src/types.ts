@@ -125,6 +125,7 @@ export type Scene = {
   avatar_visible?: boolean;
   visual_prompt?: string | null;
   source_id?: string | null;
+  source_query?: string | null;
   source_name?: string | null;
   visual_url?: string | null;
   audio_url?: string | null;
@@ -144,6 +145,7 @@ export type ScenePatch = {
   visual_type?: Scene['visual_type'];
   avatar_visible?: boolean;
   source_id?: string | null;
+  source_query?: string | null;
   visual_prompt?: string | null;
   notes?: string | null;
 };
@@ -155,6 +157,7 @@ export type SceneCreate = {
   visual_type?: Scene['visual_type'];
   avatar_visible?: boolean;
   source_id?: string | null;
+  source_query?: string | null;
   visual_prompt?: string | null;
   notes?: string | null;
 };
@@ -188,6 +191,7 @@ export type Project = {
     youtube_metadata_url?: string | null;
     voice_manifest_url?: string | null;
     avatar_manifest_url?: string | null;
+    visual_plan_url?: string | null;
     visual_assets_manifest_url?: string | null;
     render_manifest_url?: string | null;
     export_package_url?: string | null;

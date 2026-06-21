@@ -230,6 +230,12 @@ def test_ai_news_avatar_style_generates_avatar_screen_and_broll_storyboard(tmp_p
 
     result = pipeline.collect_sources(result.id)
     assert any(scene.visual_type == "screen_demo" and scene.source_id for scene in result.scenes)
+    assert result.result.visual_plan_path
+    visual_plan_path = Path(result.result.visual_plan_path)
+    visual_plan = json.loads(visual_plan_path.read_text(encoding="utf-8"))
+    assert visual_plan_path.exists()
+    assert any(item["visual_type"] == "screen_demo" and item["source_query"] and item["source_id"] for item in visual_plan)
+    assert all(scene.source_query for scene in result.scenes if scene.visual_type == "screen_demo")
 
     result = pipeline.generate_slides(result.id)
     manifest_path = store.project_dir(result.id) / "slides" / "render_templates.json"
@@ -240,6 +246,7 @@ def test_ai_news_avatar_style_generates_avatar_screen_and_broll_storyboard(tmp_p
     avatar_modes = {item["avatar_mode"] for item in manifest}
     asset_roles = {item["asset_role"] for item in manifest}
     visual_strategies = {item["strategy"] for item in visual_assets}
+    screen_templates = [item for item in manifest if item["visual_type"] == "screen_demo"]
 
     assert {
         "avatar_fullscreen_v1",
@@ -252,6 +259,9 @@ def test_ai_news_avatar_style_generates_avatar_screen_and_broll_storyboard(tmp_p
     assert {"fullscreen", "picture_in_picture"} <= avatar_modes
     assert {"avatar_host", "screen_recording_or_source_insert", "generated_broll", "call_to_action"} <= asset_roles
     assert "platform_screenshot_or_fallback_card" in visual_strategies
+    assert screen_templates
+    assert "source_screenshot" in screen_templates[0]["composition_layers"]
+    assert screen_templates[0]["replacement_slots"]["source_query"]
     assert visual_assets_path.exists()
     assert all(Path(scene.visual_path).exists() for scene in result.scenes)
 
@@ -1148,6 +1158,8 @@ def test_render_service_composites_local_avatar_video(tmp_path):
     assert result.status == ProjectStatus.completed
     assert Path(result.result.final_video_path).exists()
     assert render_manifest["render_mode"] == "avatar_video_composite"
+    assert render_manifest["production_timeline"]
+    assert any(item["uses_source_insert"] for item in render_manifest["production_timeline"])
     assert avatar_scene.id in quality_report["avatar_composited_scene_ids"]
     assert quality_report["checks"]["uses_avatar_video_compositor"] is True
     with ZipFile(result.result.export_package_path) as archive:

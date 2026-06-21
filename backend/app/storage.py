@@ -156,7 +156,7 @@ class ProjectStore:
         clear_avatar = False
         for key, value in changes.items():
             setattr(scene, key, value)
-            if key in {"title", "goal", "on_screen_text", "visual_type", "source_id", "visual_prompt"}:
+            if key in {"title", "goal", "on_screen_text", "visual_type", "source_id", "source_query", "visual_prompt"}:
                 clear_visual = True
             if key in {"narration", "duration_sec"}:
                 clear_audio = True
@@ -164,6 +164,8 @@ class ProjectStore:
                 clear_avatar = True
         if clear_visual:
             scene.visual_path = None
+            project.result.visual_plan_path = None
+            project.result.visual_assets_manifest_path = None
             self._clear_render_outputs(project)
         if clear_audio:
             scene.audio_path = None
@@ -199,6 +201,7 @@ class ProjectStore:
             duration_sec=payload.duration_sec,
             avatar_visible=payload.avatar_visible,
             source_id=payload.source_id,
+            source_query=payload.source_query,
         )
         for item in project.scenes:
             if item.order >= order:

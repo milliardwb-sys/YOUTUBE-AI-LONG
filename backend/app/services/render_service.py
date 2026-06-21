@@ -48,6 +48,7 @@ class RenderService:
             "voice_provider": project.voice_provider,
             "avatar_enabled": project.avatar_enabled,
             "burn_subtitles": project.burn_subtitles,
+            "production_timeline": [self._production_timeline_item(project, scene) for scene in project.scenes],
             "scenes": [scene.model_dump(mode="json") for scene in project.scenes],
             "sources": [source.model_dump(mode="json") for source in project.sources],
         }
@@ -126,6 +127,35 @@ class RenderService:
                     if source.getframerate() != params.framerate:
                         raise RuntimeError(f"WAV sample rate mismatch: {wav_path}")
                     output.writeframes(source.readframes(source.getnframes()))
+
+    def _production_timeline_item(self, project: Project, scene) -> dict[str, object]:
+        return {
+            "scene_id": scene.id,
+            "order": scene.order,
+            "start_sec": scene.start_sec,
+            "duration_sec": scene.duration_sec,
+            "visual_type": scene.visual_type,
+            "source_id": scene.source_id,
+            "source_query": scene.source_query,
+            "source_name": scene.source_name,
+            "uses_source_insert": scene.visual_type in {"screenshot", "screen_demo"} and bool(scene.source_id),
+            "uses_generated_broll": scene.visual_type == "ai_broll",
+            "uses_avatar_video": bool(scene.avatar_video_path),
+            "avatar_expected": scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"},
+            "render_layer_order": self._render_layer_order(project, scene),
+        }
+
+    def _render_layer_order(self, project: Project, scene) -> list[str]:
+        layers = ["slide_base", "voiceover"]
+        if scene.visual_type in {"screenshot", "screen_demo"}:
+            layers.insert(1, "source_screenshot")
+        if scene.visual_type == "ai_broll":
+            layers.insert(1, "ai_broll_visual")
+        if scene.avatar_visible and scene.visual_type in {"avatar_fullscreen", "avatar_pip", "screen_demo", "cta"}:
+            layers.append("avatar_video_overlay")
+        if project.burn_subtitles:
+            layers.append("subtitles")
+        return layers
 
     def resolve_ffmpeg_bin(self) -> str | None:
         configured = shutil.which(self.settings.ffmpeg_bin)
